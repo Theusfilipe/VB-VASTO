@@ -34,6 +34,10 @@ class RabbitSurvivalConfig:
     rewards: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self) -> None:
+        counts = (self.width, self.height, self.max_episode_steps,
+                  self.perception_radius, self.inventory_capacity)
+        if any(type(value) is not int for value in counts):
+            raise ValueError("World dimensions, episode duration, perception radius, and capacity must be integers")
         if min(self.width, self.height, self.max_episode_steps) < 1:
             raise ValueError("World dimensions and episode duration must be positive")
         if min(self.perception_radius, self.inventory_capacity) < 0:
