@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=80.9"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaptive-ai"
+version = "0.1.0"
+description = "Engine-independent reinforcement learning simulations"
+requires-python = ">=3.12"
+dependencies = ["gymnasium>=1.4,<2", "numpy>=2,<3"]
+
+[project.optional-dependencies]
+learning = ["stable-baselines3>=2.9.2,<3", "torch>=2.15,<3"]
+visualization = ["matplotlib>=3.11.2,<4"]
+test = ["pytest>=9.2,<10"]
+
+[tool.setuptools.packages.find]
+include = ["adaptive_ai*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
