@@ -125,25 +125,28 @@ class SimulationManager:
             output = models_directory / run_name
             await asyncio.to_thread(output.mkdir, parents=True, exist_ok=False)
             await asyncio.to_thread(write_config, output / "config.json", self.config)
-            self._training_stop_file = output / "STOP"
-            self._training_snapshot = self._snapshot().model_copy(update={
+            stop_file = output / "STOP"
+            training_snapshot = self._snapshot().model_copy(update={
                 "status": "running", "execution_mode": "training",
                 "training_run": run_name, "training_timesteps": 0,
             })
             repository_root = Path(__file__).resolve().parents[2]
-            self._training_process = await asyncio.create_subprocess_exec(
+            process = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "backend.app.live_training",
                 "--output", str(output), "--steps", str(total_steps), "--seed", str(seed),
-                "--stop-file", str(self._training_stop_file),
+                "--stop-file", str(stop_file),
                 cwd=repository_root,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
+            self._training_stop_file = stop_file
+            self._training_process = process
+            self._training_snapshot = training_snapshot
             self._training_task = asyncio.create_task(
-                self._collect_live_training(self._training_process, run_name),
+                self._collect_live_training(process, run_name),
                 name=f"live-training-{run_name}",
             )
-            return self._training_snapshot
+            return training_snapshot
 
     async def stop_live_training(self) -> SimulationSnapshot:
         async with self._lock:

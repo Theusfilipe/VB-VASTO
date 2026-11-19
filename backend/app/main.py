@@ -59,17 +59,26 @@ async def get_config(request: Request) -> SimulationConfig:
 
 @app.post("/simulation/start", response_model=SimulationSnapshot)
 async def start_simulation(request: Request) -> SimulationSnapshot:
-    return await manager_from(request).start()
+    try:
+        return await manager_from(request).start()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/simulation/pause", response_model=SimulationSnapshot)
 async def pause_simulation(request: Request) -> SimulationSnapshot:
-    return await manager_from(request).pause()
+    try:
+        return await manager_from(request).pause()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/simulation/reset", response_model=SimulationSnapshot)
 async def reset_simulation(body: ResetRequest, request: Request) -> SimulationSnapshot:
-    return await manager_from(request).reset(body.seed)
+    try:
+        return await manager_from(request).reset(body.seed)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/simulation/step", response_model=OperationResult)
@@ -82,7 +91,10 @@ async def step_simulation(body: StepRequest, request: Request) -> OperationResul
 
 @app.post("/simulation/speed", response_model=SimulationSnapshot)
 async def set_speed(body: SpeedRequest, request: Request) -> SimulationSnapshot:
-    return await manager_from(request).set_speed(body.speed)
+    try:
+        return await manager_from(request).set_speed(body.speed)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/simulation/policy", response_model=SimulationSnapshot)
@@ -96,6 +108,8 @@ async def load_policy(body: PolicyRequest, request: Request) -> SimulationSnapsh
         raise HTTPException(status_code=404, detail="Policy not found in ADAPTIVE_AI_MODELS_DIR")
     try:
         return await manager_from(request).load_policy(model_path)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ImportError as error:
         raise HTTPException(status_code=503, detail="Install the learning extra to load PPO policies") from error
     except (OSError, ValueError, TypeError) as error:

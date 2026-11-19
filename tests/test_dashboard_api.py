@@ -102,6 +102,23 @@ def test_training_requires_optional_dependencies_and_configured_output(monkeypat
         assert client.post("/training/start", json={"total_steps": 512}).status_code == 503
 
 
+def test_live_training_launch_failure_keeps_previous_simulation_state(tmp_path, monkeypatch) -> None:
+    import backend.app.manager as manager_module
+
+    async def fail_to_start(*args, **kwargs):
+        raise OSError("process launch failed")
+
+    monkeypatch.setattr(manager_module.asyncio, "create_subprocess_exec", fail_to_start)
+    monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(tmp_path))
+    with TestClient(app) as client:
+        response = client.post("/training/start", json={"total_steps": 512})
+        assert response.status_code == 500
+        snapshot = client.get("/simulation/state").json()
+        assert snapshot["execution_mode"] == "simulation"
+        assert snapshot["status"] == "paused"
+        assert client.post("/training/stop").json()["execution_mode"] == "simulation"
+
+
 def test_policy_paths_allow_training_runs_but_reject_traversal() -> None:
     assert PolicyRequest(model_name="live-a1b2c3/ppo_final.zip").model_name
     for model_name in ("../outside.zip", "live/../../outside.zip", "/outside.zip", "bad name.zip"):
@@ -147,6 +164,13 @@ def test_live_training_streams_snapshots_and_loads_saved_policy(tmp_path, monkey
 
         restarted = client.post("/training/start", json={"total_steps": 5_000_000, "seed": 19})
         assert restarted.status_code == 200, restarted.text
+        assert client.post("/simulation/start").status_code == 409
+        assert client.post("/simulation/pause").status_code == 409
+        assert client.post("/simulation/reset", json={"seed": 20}).status_code == 409
+        assert client.post("/simulation/speed", json={"speed": 2}).status_code == 409
+        assert client.post("/simulation/policy", json={
+            "model_name": f"{run_name}/ppo_final.zip",
+        }).status_code == 409
         stopped = client.post("/training/stop")
         assert stopped.status_code == 200, stopped.text
         assert stopped.json()["execution_mode"] == "training"
