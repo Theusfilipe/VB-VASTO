@@ -28,13 +28,13 @@ class RewardConfigSchema(Schema):
 
 
 class SimulationConfig(Schema):
-    width: int = Field(default=5, ge=1, le=100)
-    height: int = Field(default=5, ge=1, le=100)
+    width: int = Field(default=5, ge=1)
+    height: int = Field(default=5, ge=1)
     max_episode_steps: int = Field(default=200, ge=1)
     resource_density: float = Field(default=0.32, ge=0, le=1)
     regeneration_probability: float = Field(default=0.25, ge=0, le=1)
-    perception_radius: int = Field(default=1, ge=0, le=20)
-    inventory_capacity: int = Field(default=3, ge=0, le=100)
+    perception_radius: int = Field(default=1, ge=0)
+    inventory_capacity: int = Field(default=3, ge=0)
     plant_nutrition: float = Field(default=14, ge=0)
     move_energy_cost: float = Field(default=0.75, ge=0)
     move_fatigue_gain: float = Field(default=0.75, ge=0)

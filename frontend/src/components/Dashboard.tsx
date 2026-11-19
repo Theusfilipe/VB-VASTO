@@ -61,6 +61,7 @@ export function Dashboard() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [action, setAction] = useState(0);
   const [seed, setSeed] = useState("0");
+  const [policyName, setPolicyName] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,6 +179,7 @@ export function Dashboard() {
             <button className="button button-outline" disabled={busy || running} onClick={() => void control("/simulation/step", { action })}><span>→</span> Step</button>
             <select className="action-select" aria-label="Action for manual step" value={action} onChange={(event) => setAction(Number(event.target.value))} disabled={busy || running}>{ACTIONS.map((name, index) => <option value={index} key={name}>{name.replaceAll("_", " ")}</option>)}</select>
             <div className="speed-control"><span>SPEED</span><div>{speeds.map((speed) => <button key={speed} onClick={() => void control("/simulation/speed", { speed })} className={snapshot?.speed === speed ? "speed-active" : ""} aria-pressed={snapshot?.speed === speed}>{speed}×</button>)}</div></div>
+            <div className="policy-control"><input aria-label="PPO checkpoint filename" placeholder="policy.zip" value={policyName} onChange={(event) => setPolicyName(event.target.value)} /><button className="button button-outline" disabled={busy || !policyName.trim()} onClick={() => void control("/simulation/policy", { model_name: policyName.trim() })}>Load policy</button></div>
             <div className="reset-control"><input aria-label="Reset seed" value={seed} inputMode="numeric" onChange={(event) => setSeed(event.target.value)} /><button className="button button-outline" disabled={busy} onClick={() => void control("/simulation/reset", { seed: seed === "" ? null : Number(seed) })}>Reset</button></div>
           </div>
         </div>

@@ -100,8 +100,9 @@ class SimulationManager:
             return asdict(self.config)
 
     async def load_policy(self, model_path: Path) -> SimulationSnapshot:
+        candidate = await asyncio.to_thread(self._prepare_policy, model_path)
         async with self._lock:
-            return await asyncio.to_thread(self._install_policy, model_path)
+            return await asyncio.to_thread(self._install_policy, *candidate)
 
     async def _run(self) -> None:
         next_tick = time.monotonic()
@@ -200,7 +201,7 @@ class SimulationManager:
             policy_name=self.policy_name,
         )
 
-    def _install_policy(self, model_path: Path) -> SimulationSnapshot:
+    def _prepare_policy(self, model_path: Path) -> tuple[RabbitSurvivalEnv, Any, Any, RabbitSurvivalConfig]:
         from stable_baselines3 import PPO
 
         with model_path.with_name("config.json").open(encoding="utf-8") as stream:
@@ -221,6 +222,12 @@ class SimulationManager:
         except Exception:
             candidate_env.close()
             raise
+        return candidate_env, observation, model, config
+
+    def _install_policy(
+        self, candidate_env: RabbitSurvivalEnv, observation: Any, model: Any,
+        config: RabbitSurvivalConfig,
+    ) -> SimulationSnapshot:
         self.env.close()
         self.env = candidate_env
         self.config = config
