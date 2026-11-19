@@ -45,7 +45,6 @@ class SimulationManager:
         self._wake = asyncio.Event()
         self._runner: asyncio.Task[None] | None = None
         self._closed = False
-        self._last_transition: OperationResult | None = None
 
     async def start_runner(self) -> None:
         self._runner = asyncio.create_task(self._run(), name="simulation-runner")
@@ -128,7 +127,6 @@ class SimulationManager:
     def _reset(self, seed: int | None = None) -> SimulationSnapshot:
         self.observation, _ = self.env.reset(seed=seed)
         self.episode += 1
-        self._last_transition = None
         return self._snapshot()
 
     def _advance(self, action: int | None = None) -> OperationResult:
@@ -149,7 +147,6 @@ class SimulationManager:
         result = OperationResult(
             snapshot=snapshot, reward=reward, terminated=terminated, truncated=truncated,
         )
-        self._last_transition = result
         return result
 
     def _record_metric(self, info: dict[str, Any]) -> None:
@@ -236,5 +233,4 @@ class SimulationManager:
         self.policy_name = model_path.name
         self.episode += 1
         self.metrics.clear()
-        self._last_transition = None
         return self._snapshot()

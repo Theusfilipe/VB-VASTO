@@ -18,7 +18,6 @@ from backend.app.schemas import (
     SpeedRequest,
     StepRequest,
 )
-from adaptive_ai.environments.rabbit_survival.run_config import read_config
 
 
 @asynccontextmanager

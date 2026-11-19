@@ -16,7 +16,7 @@ web = ["fastapi>=0.165,<1", "uvicorn[standard]>=0.54,<1", "pydantic>=2.14,<3"]
 test = ["pytest>=9.2,<10", "httpx>=0.28,<1"]
 
 [tool.setuptools.packages.find]
-include = ["adaptive_ai*"]
+include = ["adaptive_ai*", "backend*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

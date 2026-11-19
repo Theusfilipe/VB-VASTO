@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from pytest import approx
 
 from backend.app.main import app
 
@@ -52,7 +53,39 @@ def test_running_simulation_advances_independently_of_websocket_clients() -> Non
             websocket.receive_json()
             websocket.receive_json()
             later = client.get("/simulation/state").json()["simulation_step"]
-            assert later >= first
+            assert later > first
         paused = client.post("/simulation/pause").json()
         step = paused["simulation_step"]
         assert client.get("/simulation/state").json()["simulation_step"] == step
+
+
+def test_episode_metrics_are_emitted_from_completed_simulation() -> None:
+    with TestClient(app) as client:
+        client.post("/simulation/reset", json={"seed": 3})
+        for _ in range(36):
+            transition = client.post("/simulation/step", json={"action": 0}).json()
+        assert transition["terminated"] is True
+        metric = transition["snapshot"]["metrics"][-1]
+        assert metric["episode"] == transition["snapshot"]["episode"]
+        assert metric["survival_duration"] == 36
+        assert metric["food_consumption"] == 0
+        assert metric["sleeping_frequency"] == 0
+        assert metric["reward"] == approx(-0.5)
+
+
+def test_snapshot_is_immutable() -> None:
+    with TestClient(app) as client:
+        snapshot = client.app.state.simulation
+        snapshot = snapshot._snapshot()
+        try:
+            snapshot.status = "running"
+        except Exception as error:
+            assert error.__class__.__name__ == "ValidationError"
+        else:
+            raise AssertionError("snapshot models must be immutable")
+        try:
+            snapshot.agents[0].energy = 0
+        except Exception as error:
+            assert error.__class__.__name__ == "ValidationError"
+        else:
+            raise AssertionError("agent snapshots must be immutable")

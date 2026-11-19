@@ -134,7 +134,7 @@ export function Dashboard() {
     setBusy(true);
     setError(null);
     try {
-      const result = await request<SimulationSnapshot | { snapshot: SimulationSnapshot }>(path, body);
+      const result = await request<SimulationSnapshot | { snapshot: SimulationSnapshot }>(path, body ?? {});
       updateSnapshot("snapshot" in result ? result.snapshot : result);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Simulation request failed.");
