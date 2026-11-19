@@ -89,12 +89,15 @@ class SimulationSnapshot(Schema):
     simulation_step: int
     episode: int
     status: Literal["running", "paused"]
+    execution_mode: Literal["simulation", "evaluation", "training"] = "simulation"
     speed: Literal[1, 2, 5, 10]
     resources: tuple[ResourceSnapshot, ...]
     agents: tuple[AgentSnapshot, ...]
     cumulative_reward: float
     metrics: tuple[EpisodeMetric, ...]
     policy_name: str | None = None
+    training_run: str | None = None
+    training_timesteps: int | None = None
 
 
 class StepRequest(Schema):
@@ -110,7 +113,15 @@ class SpeedRequest(Schema):
 
 
 class PolicyRequest(Schema):
-    model_name: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.zip$")
+    model_name: str = Field(
+        min_length=1, max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*(?:/[A-Za-z0-9][A-Za-z0-9_.-]*)*\.zip$",
+    )
+
+
+class TrainingRequest(Schema):
+    total_steps: int = Field(default=150_000, ge=512, le=5_000_000)
+    seed: int = Field(default=0, ge=0, le=2**32 - 1)
 
 
 class OperationResult(Schema):

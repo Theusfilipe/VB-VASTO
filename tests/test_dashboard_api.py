@@ -1,7 +1,11 @@
+import time
+
 from fastapi.testclient import TestClient
+import pytest
 from pytest import approx
 
 from backend.app.main import app
+from backend.app.schemas import PolicyRequest
 
 
 def test_snapshot_controls_and_shared_websocket_state() -> None:
@@ -89,3 +93,62 @@ def test_snapshot_is_immutable() -> None:
             assert error.__class__.__name__ == "ValidationError"
         else:
             raise AssertionError("agent snapshots must be immutable")
+
+
+def test_training_requires_optional_dependencies_and_configured_output(monkeypatch) -> None:
+    monkeypatch.delenv("ADAPTIVE_AI_MODELS_DIR", raising=False)
+    with TestClient(app) as client:
+        assert client.post("/training/start", json={"total_steps": 511}).status_code == 422
+        assert client.post("/training/start", json={"total_steps": 512}).status_code == 503
+
+
+def test_policy_paths_allow_training_runs_but_reject_traversal() -> None:
+    assert PolicyRequest(model_name="live-a1b2c3/ppo_final.zip").model_name
+    for model_name in ("../outside.zip", "live/../../outside.zip", "/outside.zip", "bad name.zip"):
+        try:
+            PolicyRequest(model_name=model_name)
+        except ValueError:
+            continue
+        raise AssertionError(f"unsafe policy path was accepted: {model_name}")
+
+
+def test_live_training_streams_snapshots_and_loads_saved_policy(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("stable_baselines3")
+    monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(tmp_path))
+    with TestClient(app) as client:
+        started = client.post("/training/start", json={"total_steps": 512, "seed": 17})
+        assert started.status_code == 200, started.text
+        initial = started.json()
+        assert initial["execution_mode"] == "training"
+        assert initial["status"] == "running"
+        run_name = initial["training_run"]
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            latest = client.get("/simulation/state").json()
+            if latest["status"] == "paused":
+                break
+            time.sleep(0.05)
+        else:
+            client.post("/training/stop")
+            pytest.fail("live PPO run did not finish")
+
+        assert latest["execution_mode"] == "training"
+        assert latest["training_timesteps"] >= 512
+        assert (tmp_path / run_name / "ppo_final.zip").is_file()
+        assert (tmp_path / run_name / "config.json").is_file()
+
+        loaded = client.post(
+            "/simulation/policy",
+            json={"model_name": f"{run_name}/ppo_final.zip"},
+        )
+        assert loaded.status_code == 200, loaded.text
+        assert loaded.json()["execution_mode"] == "evaluation"
+        assert loaded.json()["policy_name"] == "ppo_final.zip"
+
+        restarted = client.post("/training/start", json={"total_steps": 5_000_000, "seed": 19})
+        assert restarted.status_code == 200, restarted.text
+        stopped = client.post("/training/stop")
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["execution_mode"] == "training"
+        assert stopped.json()["status"] == "paused"
+        assert (tmp_path / stopped.json()["training_run"] / "ppo_final.zip").is_file()

@@ -1,27 +1,22 @@
 import asyncio
 import json
 import logging
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from adaptive_ai.environments.rabbit_survival import RabbitSurvivalConfig, RabbitSurvivalEnv
 from adaptive_ai.environments.rabbit_survival.actions import Action
 from adaptive_ai.environments.rabbit_survival.config import RewardConfig
 from adaptive_ai.mechanics.metabolism import MetabolismConfig
-from adaptive_ai.resources.plant_fiber import PlantFiber
 from gymnasium import spaces
+from adaptive_ai.environments.rabbit_survival.run_config import write_config
 
-from backend.app.schemas import (
-    AgentSnapshot,
-    EpisodeMetric,
-    OperationResult,
-    Position,
-    ResourceSnapshot,
-    SimulationSnapshot,
-    WorldDimensions,
-)
+from backend.app.schemas import EpisodeMetric, OperationResult, SimulationSnapshot
+from backend.app.snapshot import snapshot_from_env
 
 logger = logging.getLogger(__name__)
 SNAPSHOT_RATE = 10
@@ -45,6 +40,10 @@ class SimulationManager:
         self._wake = asyncio.Event()
         self._runner: asyncio.Task[None] | None = None
         self._closed = False
+        self._training_process: asyncio.subprocess.Process | None = None
+        self._training_task: asyncio.Task[None] | None = None
+        self._training_snapshot: SimulationSnapshot | None = None
+        self._training_stop_file: Path | None = None
 
     async def start_runner(self) -> None:
         self._runner = asyncio.create_task(self._run(), name="simulation-runner")
@@ -55,11 +54,14 @@ class SimulationManager:
         self._wake.set()
         if self._runner is not None:
             await self._runner
+        await self.stop_live_training()
         async with self._lock:
             await asyncio.to_thread(self.env.close)
 
     async def start(self) -> SimulationSnapshot:
         async with self._lock:
+            self._ensure_training_stopped()
+            self._training_snapshot = None
             if self.env._needs_reset:
                 await asyncio.to_thread(self._reset)
             self.running = True
@@ -68,11 +70,13 @@ class SimulationManager:
 
     async def pause(self) -> SimulationSnapshot:
         async with self._lock:
+            self._ensure_training_stopped()
             self.running = False
             return await asyncio.to_thread(self._snapshot)
 
     async def reset(self, seed: int | None) -> SimulationSnapshot:
         async with self._lock:
+            self._ensure_training_stopped()
             snapshot = await asyncio.to_thread(self._reset, seed)
             return snapshot
 
@@ -80,18 +84,24 @@ class SimulationManager:
         if speed not in ALLOWED_SPEEDS:
             raise ValueError(f"Speed must be one of {ALLOWED_SPEEDS}")
         async with self._lock:
+            self._ensure_training_stopped()
+            self._training_snapshot = None
             self.speed = speed
             self._wake.set()
             return await asyncio.to_thread(self._snapshot)
 
     async def step(self, action: int | None = None) -> OperationResult:
         async with self._lock:
+            self._ensure_training_stopped()
+            self._training_snapshot = None
             if self.running:
                 raise RuntimeError("Pause the simulation before stepping manually")
             return await asyncio.to_thread(self._advance, action)
 
     async def snapshot(self) -> SimulationSnapshot:
         async with self._lock:
+            if self._training_snapshot is not None:
+                return self._training_snapshot
             return await asyncio.to_thread(self._snapshot)
 
     async def configuration(self) -> dict[str, Any]:
@@ -101,7 +111,52 @@ class SimulationManager:
     async def load_policy(self, model_path: Path) -> SimulationSnapshot:
         candidate = await asyncio.to_thread(self._prepare_policy, model_path)
         async with self._lock:
+            self._ensure_training_stopped()
             return await asyncio.to_thread(self._install_policy, *candidate)
+
+    async def start_live_training(
+        self, total_steps: int, seed: int, models_directory: Path,
+    ) -> SimulationSnapshot:
+        async with self._lock:
+            self._ensure_training_stopped()
+            if self.running:
+                raise RuntimeError("Pause the simulation before starting live training")
+            run_name = f"live-{uuid4().hex[:12]}"
+            output = models_directory / run_name
+            await asyncio.to_thread(output.mkdir, parents=True, exist_ok=False)
+            await asyncio.to_thread(write_config, output / "config.json", self.config)
+            self._training_stop_file = output / "STOP"
+            self._training_snapshot = self._snapshot().model_copy(update={
+                "status": "running", "execution_mode": "training",
+                "training_run": run_name, "training_timesteps": 0,
+            })
+            repository_root = Path(__file__).resolve().parents[2]
+            self._training_process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "backend.app.live_training",
+                "--output", str(output), "--steps", str(total_steps), "--seed", str(seed),
+                "--stop-file", str(self._training_stop_file),
+                cwd=repository_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            self._training_task = asyncio.create_task(
+                self._collect_live_training(self._training_process, run_name),
+                name=f"live-training-{run_name}",
+            )
+            return self._training_snapshot
+
+    async def stop_live_training(self) -> SimulationSnapshot:
+        async with self._lock:
+            process = self._training_process
+            task = self._training_task
+            stop_file = self._training_stop_file
+            if process is not None and process.returncode is None and stop_file is not None:
+                await asyncio.to_thread(stop_file.touch, exist_ok=True)
+        if task is not None:
+            await task
+        elif process is not None:
+            await process.wait()
+        return await self.snapshot()
 
     async def _run(self) -> None:
         next_tick = time.monotonic()
@@ -124,7 +179,33 @@ class SimulationManager:
                         self.running = False
             await asyncio.sleep(max(0, next_tick - time.monotonic()))
 
+    async def _collect_live_training(
+        self, process: asyncio.subprocess.Process, run_name: str,
+    ) -> None:
+        assert process.stdout is not None
+        prefix = "ADAPTIVE_AI_SNAPSHOT:"
+        async for line in process.stdout:
+            decoded = line.decode(errors="replace").strip()
+            if decoded.startswith(prefix):
+                try:
+                    self._training_snapshot = SimulationSnapshot.model_validate_json(decoded[len(prefix):])
+                except ValueError:
+                    logger.exception("Ignoring invalid live training snapshot")
+            elif decoded:
+                logger.info("Live training %s: %s", run_name, decoded)
+        return_code = await process.wait()
+        if return_code:
+            logger.error("Live training process exited with status %d", return_code)
+        if self._training_snapshot is not None:
+            self._training_snapshot = self._training_snapshot.model_copy(update={"status": "paused"})
+        self._training_process = None
+
+    def _ensure_training_stopped(self) -> None:
+        if self._training_task is not None and not self._training_task.done():
+            raise RuntimeError("Stop live training before controlling the simulation")
+
     def _reset(self, seed: int | None = None) -> SimulationSnapshot:
+        self._training_snapshot = None
         self.observation, _ = self.env.reset(seed=seed)
         self.episode += 1
         return self._snapshot()
@@ -161,44 +242,22 @@ class SimulationManager:
             food_consumption=int(info["food_eaten"]),
             sleeping_frequency=float(info["sleep_steps"] / duration) if duration else 0,
         ))
-        self.metrics = self.metrics[-1000:]
+        self.metrics = self.metrics[-100:]
 
     def _snapshot(self) -> SimulationSnapshot:
-        rabbit = self.env.rabbit
-        agent = AgentSnapshot(
-            identifier=rabbit.identifier,
-            position=Position(x=rabbit.position[0], y=rabbit.position[1]),
-            energy=rabbit.energy,
-            max_energy=rabbit.max_energy,
-            fatigue=rabbit.fatigue,
-            max_fatigue=rabbit.max_fatigue,
-            inventory=len(rabbit.inventory),
-            inventory_capacity=rabbit.inventory_capacity,
-            current_action=self.env.last_action,
-            perception_radius=self.config.perception_radius,
-            age=rabbit.age,
-            alive=rabbit.alive,
-        )
-        resources = [
-            ResourceSnapshot(kind=resource.resource_type, position=Position(x=x, y=y),
-                             quantity=resource.quantity)
-            for (x, y), resource in sorted(self.env.world.plants.items())
-            if isinstance(resource, PlantFiber)
-        ]
-        return SimulationSnapshot(
-            dimensions=WorldDimensions(width=self.config.width, height=self.config.height),
-            simulation_step=rabbit.age,
+        return snapshot_from_env(
+            self.env,
             episode=self.episode,
-            status="running" if self.running else "paused",
+            running=self.running,
             speed=self.speed,
-            resources=tuple(resources),
-            agents=(agent,),
-            cumulative_reward=float(self.env.cumulative_reward),
-            metrics=tuple(self.metrics),
+            metrics=self.metrics,
+            execution_mode="evaluation" if self.policy is not None else "simulation",
             policy_name=self.policy_name,
         )
 
-    def _prepare_policy(self, model_path: Path) -> tuple[RabbitSurvivalEnv, Any, Any, RabbitSurvivalConfig]:
+    def _prepare_policy(
+        self, model_path: Path,
+    ) -> tuple[RabbitSurvivalEnv, Any, Any, RabbitSurvivalConfig, str]:
         from stable_baselines3 import PPO
 
         with model_path.with_name("config.json").open(encoding="utf-8") as stream:
@@ -219,18 +278,19 @@ class SimulationManager:
         except Exception:
             candidate_env.close()
             raise
-        return candidate_env, observation, model, config
+        return candidate_env, observation, model, config, model_path.name
 
     def _install_policy(
         self, candidate_env: RabbitSurvivalEnv, observation: Any, model: Any,
-        config: RabbitSurvivalConfig,
+        config: RabbitSurvivalConfig, model_name: str,
     ) -> SimulationSnapshot:
         self.env.close()
         self.env = candidate_env
         self.config = config
         self.observation = observation
         self.policy = model
-        self.policy_name = model_path.name
+        self.policy_name = model_name
+        self._training_snapshot = None
         self.episode += 1
         self.metrics.clear()
         return self._snapshot()

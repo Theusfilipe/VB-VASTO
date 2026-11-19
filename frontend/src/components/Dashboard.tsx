@@ -61,6 +61,7 @@ export function Dashboard() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [action, setAction] = useState(0);
   const [seed, setSeed] = useState("0");
+  const [trainingSteps, setTrainingSteps] = useState("150000");
   const [policyName, setPolicyName] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +145,8 @@ export function Dashboard() {
   }
 
   const running = snapshot?.status === "running";
+  const liveTraining = snapshot?.execution_mode === "training";
+  const trainingRunning = running && liveTraining;
 
   return (
     <main className="dashboard-shell">
@@ -154,7 +157,7 @@ export function Dashboard() {
 
       <section className="page-intro">
         <div><p className="eyebrow">OBSERVATION STUDIO <span>•</span> RABBIT SURVIVAL</p><h1>Simulation dashboard</h1><p className="intro-copy">A live view into agent behavior and environmental state.</p></div>
-        <div className="episode-badge"><span>EPISODE</span><b>{snapshot?.episode ?? "—"}</b><i />{running ? "RUNNING" : "PAUSED"}</div>
+        <div className="episode-badge"><span>EPISODE</span><b>{snapshot?.episode ?? "—"}</b><i />{trainingRunning ? "LIVE TRAINING" : running ? "RUNNING" : "PAUSED"}</div>
       </section>
 
       {error && <div className="error-banner" role="status"><span>Connection notice</span>{error}<button onClick={() => window.location.reload()}>Retry</button></div>}
@@ -175,12 +178,19 @@ export function Dashboard() {
           <div className="world-legend"><span><i className="legend-rabbit" />Rabbit</span><span><i className="legend-resource" />Plant fiber</span><span><i className="legend-radius" />Perception radius</span><span className="world-step">STEP <b>{snapshot?.simulation_step ?? "—"}</b></span></div>
           <div className="controls">
             <button className={`button ${running ? "button-muted" : "button-primary"}`} disabled={busy || running} onClick={() => void control("/simulation/start")}><span>▶</span> Start</button>
-            <button className={`button ${running ? "button-primary" : "button-muted"}`} disabled={busy || !running} onClick={() => void control("/simulation/pause")}><span>Ⅱ</span> Pause</button>
+            <button className={`button ${running ? "button-primary" : "button-muted"}`} disabled={busy || !running || trainingRunning} onClick={() => void control("/simulation/pause")}><span>Ⅱ</span> Pause</button>
             <button className="button button-outline" disabled={busy || running} onClick={() => void control("/simulation/step", { action })}><span>→</span> Step</button>
             <select className="action-select" aria-label="Action for manual step" value={action} onChange={(event) => setAction(Number(event.target.value))} disabled={busy || running}>{ACTIONS.map((name, index) => <option value={index} key={name}>{name.replaceAll("_", " ")}</option>)}</select>
-            <div className="speed-control"><span>SPEED</span><div>{speeds.map((speed) => <button key={speed} onClick={() => void control("/simulation/speed", { speed })} className={snapshot?.speed === speed ? "speed-active" : ""} aria-pressed={snapshot?.speed === speed}>{speed}×</button>)}</div></div>
-            <div className="policy-control"><input aria-label="PPO checkpoint filename" placeholder="policy.zip" value={policyName} onChange={(event) => setPolicyName(event.target.value)} /><button className="button button-outline" disabled={busy || !policyName.trim()} onClick={() => void control("/simulation/policy", { model_name: policyName.trim() })}>Load policy</button></div>
-            <div className="reset-control"><input aria-label="Reset seed" value={seed} inputMode="numeric" onChange={(event) => setSeed(event.target.value)} /><button className="button button-outline" disabled={busy} onClick={() => void control("/simulation/reset", { seed: seed === "" ? null : Number(seed) })}>Reset</button></div>
+            <div className="speed-control"><span>SPEED</span><div>{speeds.map((speed) => <button key={speed} disabled={liveTraining} onClick={() => void control("/simulation/speed", { speed })} className={snapshot?.speed === speed ? "speed-active" : ""} aria-pressed={snapshot?.speed === speed}>{speed}×</button>)}</div></div>
+            <div className="policy-control"><input aria-label="PPO checkpoint filename" placeholder="policy.zip or live-run/ppo_final.zip" value={policyName} onChange={(event) => setPolicyName(event.target.value)} /><button className="button button-outline" disabled={busy || liveTraining || !policyName.trim()} onClick={() => void control("/simulation/policy", { model_name: policyName.trim() })}>Load policy</button></div>
+            <div className="reset-control"><input aria-label="Reset seed" value={seed} inputMode="numeric" onChange={(event) => setSeed(event.target.value)} /><button className="button button-outline" disabled={busy || trainingRunning} onClick={() => void control("/simulation/reset", { seed: seed === "" ? null : Number(seed) })}>Reset</button></div>
+            <div className="training-control">
+              <span>{liveTraining && snapshot?.training_timesteps !== null && snapshot?.training_timesteps !== undefined ? `${snapshot.training_timesteps.toLocaleString()} steps · ${snapshot.training_run}` : "LIVE PPO"}</span>
+              <input aria-label="Live training timesteps" type="number" min={512} max={5000000} step={512} value={trainingSteps} onChange={(event) => setTrainingSteps(event.target.value)} disabled={trainingRunning} />
+              {trainingRunning
+                ? <button className="button button-outline" disabled={busy} onClick={() => void control("/training/stop")}>Stop training</button>
+                : <button className="button button-outline" disabled={busy || running || Number(trainingSteps) < 512} onClick={() => void control("/training/start", { total_steps: Number(trainingSteps), seed: Number(seed || 0) })}>Train live</button>}
+            </div>
           </div>
         </div>
 

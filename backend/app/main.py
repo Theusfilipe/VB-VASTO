@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,6 +18,7 @@ from backend.app.schemas import (
     SimulationSnapshot,
     SpeedRequest,
     StepRequest,
+    TrainingRequest,
 )
 
 
@@ -90,7 +92,7 @@ async def load_policy(body: PolicyRequest, request: Request) -> SimulationSnapsh
         raise HTTPException(status_code=503, detail="Set ADAPTIVE_AI_MODELS_DIR to enable trusted local policies")
     root = Path(models_directory).expanduser().resolve()
     model_path = (root / body.model_name).resolve()
-    if model_path.parent != root or not model_path.is_file():
+    if not model_path.is_relative_to(root) or not model_path.is_file():
         raise HTTPException(status_code=404, detail="Policy not found in ADAPTIVE_AI_MODELS_DIR")
     try:
         return await manager_from(request).load_policy(model_path)
@@ -98,6 +100,28 @@ async def load_policy(body: PolicyRequest, request: Request) -> SimulationSnapsh
         raise HTTPException(status_code=503, detail="Install the learning extra to load PPO policies") from error
     except (OSError, ValueError, TypeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/training/start", response_model=SimulationSnapshot)
+async def start_live_training(body: TrainingRequest, request: Request) -> SimulationSnapshot:
+    if importlib.util.find_spec("stable_baselines3") is None:
+        raise HTTPException(status_code=503, detail="Install the learning extra to start PPO training")
+    models_directory = os.getenv("ADAPTIVE_AI_MODELS_DIR")
+    if not models_directory:
+        raise HTTPException(status_code=503, detail="Set ADAPTIVE_AI_MODELS_DIR to save trusted training runs")
+    root = Path(models_directory).expanduser().resolve()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        return await manager_from(request).start_live_training(body.total_steps, body.seed, root)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail="Unable to create the training output directory") from error
+
+
+@app.post("/training/stop", response_model=SimulationSnapshot)
+async def stop_live_training(request: Request) -> SimulationSnapshot:
+    return await manager_from(request).stop_live_training()
 
 
 @app.websocket("/ws/simulation")

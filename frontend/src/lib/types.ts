@@ -35,12 +35,15 @@ export type SimulationSnapshot = {
   simulation_step: number;
   episode: number;
   status: "running" | "paused";
+  execution_mode: "simulation" | "evaluation" | "training";
   speed: 1 | 2 | 5 | 10;
   resources: ResourceSnapshot[];
   agents: AgentSnapshot[];
   cumulative_reward: number;
   metrics: EpisodeMetric[];
   policy_name: string | null;
+  training_run: string | null;
+  training_timesteps: number | null;
 };
 
 export type SimulationConfig = {
