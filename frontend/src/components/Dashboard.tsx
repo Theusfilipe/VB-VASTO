@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { WorldCanvas } from "@/components/WorldCanvas";
 import { TrainingMetrics } from "@/components/TrainingMetrics";
+import { TopNavigation } from "@/components/TopNavigation";
 import { API_URL, WS_URL } from "@/lib/types";
 import type { AgentSnapshot, PolicyCatalog, SimulationConfig, SimulationSnapshot } from "@/lib/types";
 
@@ -182,7 +183,7 @@ export function Dashboard() {
   const validTrainingSeed = Number.isInteger(parsedTrainingSeed) && parsedTrainingSeed >= 0
     && parsedTrainingSeed <= 4294967295;
   const trainingHint = !snapshot ? "Waiting for a connection to the simulation backend."
-    : running && !liveTraining ? "Pause playback before starting training."
+    : running && !liveTraining ? "Pause the simulation before starting training."
     : catalog?.configured === false ? "Restart the backend with ADAPTIVE_AI_MODELS_DIR set to a trusted checkpoint directory."
     : trainingBudget === "steps" && !validTrainingSteps ? "Enter a whole number of training steps from 512 to 5,000,000."
     : trainingBudget === "episodes" && !validTrainingEpisodes ? "Enter a whole number of episodes from 1 to 10,000."
@@ -209,10 +210,10 @@ export function Dashboard() {
 
   return (
     <main className="dashboard-shell">
-      <header className="topbar">
-        <a className="brand" href="#" aria-label="Adaptive Field home"><span className="brand-mark">a.</span><span>adaptive<span className="brand-light">field</span></span></a>
-        <div className="topbar-meta"><span className={`connection-dot ${connected ? "online" : ""}`} />{connected ? "Live connection" : "Reconnecting"}<i />Simulation dashboard</div>
-      </header>
+      <TopNavigation
+        current="simulation"
+        meta={<><span className={`connection-dot ${connected ? "online" : ""}`} />{connected ? "Live connection" : "Reconnecting"}<i />Simulation dashboard</>}
+      />
 
       <section className="page-intro">
         <div><p className="eyebrow">OBSERVATION STUDIO <span>•</span> RABBIT SURVIVAL</p><h1>Simulation dashboard</h1><p className="intro-copy">A live view into agent behavior and environmental state.</p></div>
@@ -247,18 +248,18 @@ export function Dashboard() {
               </div>
               {!liveTraining && !running && snapshot?.agents[0]?.alive === false && <p>Reset the world to start a new episode.</p>}
             </section>
-            <section className="control-section" aria-labelledby="playback-heading">
-              <h3 id="playback-heading">Playback</h3>
-              <p>{liveTraining ? "Load a saved policy or return to the simulation before playing." : activePolicy ? <>Active policy: <strong>{activePolicy}</strong>. Playback uses it without training.</> : "No policy loaded. Idle playback advances time without moving the rabbit or training it."}</p>
+            <section className="control-section" aria-labelledby="simulation-heading">
+              <h3 id="simulation-heading">Run simulation</h3>
+              <p>{liveTraining ? "Load a saved policy or return to the simulation before running it." : activePolicy ? <>Active policy: <strong>{activePolicy}</strong>. The simulation runs it without further training.</> : "No policy loaded. The idle simulation advances time without moving the rabbit or training it."}</p>
               <div className="control-row">
                 <button className="button button-primary" disabled={blocked || running || liveTraining} onClick={() => void control("/simulation/start")}>{activePolicy ? "Run policy" : "Run idle simulation"}</button>
-                <button className="button button-outline" disabled={blocked || !running || liveTraining} onClick={() => void control("/simulation/pause")}>Pause playback</button>
+                <button className="button button-outline" disabled={blocked || !running || liveTraining} onClick={() => void control("/simulation/pause")}>Pause simulation</button>
                 <div className="speed-control"><span>SPEED</span><div>{speeds.map((speed) => <button key={speed} disabled={blocked || liveTraining} onClick={() => void control("/simulation/speed", { speed })} className={snapshot?.speed === speed ? "speed-active" : ""} aria-pressed={snapshot?.speed === speed}>{speed}×</button>)}</div></div>
               </div>
               <div className="control-row">
                 <select className="action-select policy-select" aria-label="Saved policy" value={policyName} onChange={(event) => setPolicyName(event.target.value)} disabled={blocked || running || !catalog?.policies.length}>
                   <option value="">Select a saved policy</option>
-                  {catalog?.policies.map((name) => <option key={name} value={name}>{name}</option>)}
+                  {catalog?.policies.map((name) => <option key={name} value={name}>{catalog.names[name] ? `${catalog.names[name]} · ${name}` : name}</option>)}
                 </select>
                 <button className="button button-outline" disabled={blocked || running || !policyName} onClick={() => void control("/simulation/policy", { model_name: policyName })}>Load policy</button>
                 <button className="button button-outline" onClick={() => setCatalogRevision((current) => current + 1)}>Refresh policies</button>
@@ -267,7 +268,7 @@ export function Dashboard() {
             </section>
             <section className="control-section" aria-labelledby="training-heading">
               <h3 id="training-heading">Training</h3>
-              <p>Train a new PPO policy in a separate simulation. Load its saved checkpoint under Playback to use it.</p>
+              <p>Train a new PPO policy in a separate simulation. Load its saved checkpoint under Run simulation to use it.</p>
               <p>{trainingBudget === "steps" ? "PPO finishes its current rollout, so the step budget is a minimum." : "Training stops at the requested number of completed episodes. PPO only learns from full rollouts, so very short runs may save a policy before its first update."}</p>
               <div className="control-row">
                 <label>Training budget <select className="action-select" value={trainingBudget} onChange={(event) => setTrainingBudget(event.target.value === "episodes" ? "episodes" : "steps")} disabled={trainingRunning}><option value="steps">Steps</option><option value="episodes">Episodes</option></select></label>

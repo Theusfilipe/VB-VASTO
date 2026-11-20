@@ -1,6 +1,8 @@
 import asyncio
 import importlib.util
+import json
 import os
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -13,6 +15,7 @@ from backend.app.manager import SNAPSHOT_RATE, SimulationManager
 from backend.app.schemas import (
     OperationResult,
     PolicyCatalog,
+    PolicyNameRequest,
     PolicyRequest,
     ResetRequest,
     SimulationConfig,
@@ -121,6 +124,42 @@ def discover_policies(root: Path) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
+def read_policy_names(root: Path) -> dict[str, str]:
+    path = root / ".policy-names.json"
+    if not path.exists():
+        return {}
+    try:
+        names = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=503, detail=f"Could not read policy names: {error}") from error
+    if not isinstance(names, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str) or not value.strip()
+        for key, value in names.items()
+    ):
+        raise HTTPException(status_code=503, detail="Policy names file must contain a JSON object of non-empty names")
+    return names
+
+
+def save_policy_name(root: Path, model_name: str, display_name: str) -> None:
+    names = read_policy_names(root)
+    names[model_name] = display_name
+    temporary_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=root, prefix=".policy-names-", suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = temporary.name
+            json.dump(names, temporary, ensure_ascii=False, indent=2, sort_keys=True)
+            temporary.write("\n")
+        os.replace(temporary_path, root / ".policy-names.json")
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"Could not save policy name: {error}") from error
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+
 @app.get("/simulation/policies", response_model=PolicyCatalog)
 async def list_policies() -> PolicyCatalog:
     models_directory = os.getenv("ADAPTIVE_AI_MODELS_DIR")
@@ -129,7 +168,31 @@ async def list_policies() -> PolicyCatalog:
     root = Path(models_directory).expanduser().resolve()
     if root.exists() and not root.is_dir():
         raise HTTPException(status_code=503, detail="ADAPTIVE_AI_MODELS_DIR must be a directory")
-    return PolicyCatalog(configured=True, policies=await asyncio.to_thread(discover_policies, root))
+    policies = await asyncio.to_thread(discover_policies, root)
+    names = await asyncio.to_thread(read_policy_names, root)
+    return PolicyCatalog(
+        configured=True,
+        policies=policies,
+        names={policy: names[policy] for policy in policies if policy in names},
+    )
+
+
+@app.post("/simulation/policies/name", response_model=PolicyCatalog)
+async def set_policy_name(body: PolicyNameRequest) -> PolicyCatalog:
+    models_directory = os.getenv("ADAPTIVE_AI_MODELS_DIR")
+    if not models_directory:
+        raise HTTPException(status_code=503, detail="Set ADAPTIVE_AI_MODELS_DIR to manage trusted local policies")
+    root = Path(models_directory).expanduser().resolve()
+    if local_policy_path(root, body.model_name) is None:
+        raise HTTPException(status_code=404, detail="Policy and its config.json must be in ADAPTIVE_AI_MODELS_DIR")
+    await asyncio.to_thread(save_policy_name, root, body.model_name, body.display_name)
+    policies = await asyncio.to_thread(discover_policies, root)
+    names = await asyncio.to_thread(read_policy_names, root)
+    return PolicyCatalog(
+        configured=True,
+        policies=policies,
+        names={policy: names[policy] for policy in policies if policy in names},
+    )
 
 
 @app.post("/simulation/policy", response_model=SimulationSnapshot)
@@ -149,6 +212,31 @@ async def load_policy(body: PolicyRequest, request: Request) -> SimulationSnapsh
         raise HTTPException(status_code=503, detail="Install the learning extra to load PPO policies") from error
     except (OSError, ValueError, TypeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+def remove_policy_checkpoint(root: Path, model_name: str) -> None:
+    checkpoint = root / model_name
+    try:
+        resolved = local_policy_path(root, model_name)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail="Saved policy checkpoint not found")
+        if resolved != checkpoint or checkpoint.is_symlink():
+            raise HTTPException(status_code=409, detail="Cannot delete a policy through a linked path")
+        checkpoint.unlink()
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Saved policy checkpoint not found") from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"Could not delete the policy checkpoint: {error}") from error
+
+
+@app.post("/simulation/policies/delete", response_model=PolicyRequest)
+async def delete_policy(body: PolicyRequest) -> PolicyRequest:
+    models_directory = os.getenv("ADAPTIVE_AI_MODELS_DIR")
+    if not models_directory:
+        raise HTTPException(status_code=503, detail="Set ADAPTIVE_AI_MODELS_DIR to manage trusted local policies")
+    root = Path(models_directory).expanduser().resolve()
+    await asyncio.to_thread(remove_policy_checkpoint, root, body.model_name)
+    return body
 
 
 @app.post("/training/start", response_model=SimulationSnapshot)

@@ -132,10 +132,14 @@ def test_policy_paths_allow_training_runs_but_reject_traversal() -> None:
 def test_policy_catalog_lists_only_local_checkpoints_with_config(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("ADAPTIVE_AI_MODELS_DIR", raising=False)
     with TestClient(app) as client:
-        assert client.get("/simulation/policies").json() == {"configured": False, "policies": []}
+        assert client.get("/simulation/policies").json() == {
+            "configured": False, "policies": [], "names": {},
+        }
         root = tmp_path / "models"
         monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(root))
-        assert client.get("/simulation/policies").json() == {"configured": True, "policies": []}
+        assert client.get("/simulation/policies").json() == {
+            "configured": True, "policies": [], "names": {},
+        }
 
         run = root / "live-example"
         run.mkdir(parents=True)
@@ -146,8 +150,75 @@ def test_policy_catalog_lists_only_local_checkpoints_with_config(tmp_path, monke
         assert client.get("/simulation/policies").json() == {
             "configured": True,
             "policies": ["live-example/ppo_512_steps.zip", "live-example/ppo_final.zip"],
+            "names": {},
         }
         assert client.post("/simulation/policy", json={"model_name": "unpaired.zip"}).status_code == 404
+
+
+def test_policy_names_are_saved_and_renamed_without_changing_checkpoint_files(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    run = root / "live-example"
+    run.mkdir(parents=True)
+    checkpoint = run / "ppo_final.zip"
+    checkpoint.write_bytes(b"checkpoint")
+    (run / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(root))
+
+    with TestClient(app) as client:
+        response = client.post("/simulation/policies/name", json={
+            "model_name": "live-example/ppo_final.zip",
+            "display_name": "  Baseline rabbit  ",
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["names"] == {"live-example/ppo_final.zip": "Baseline rabbit"}
+        assert client.get("/simulation/policies").json()["names"] == {
+            "live-example/ppo_final.zip": "Baseline rabbit",
+        }
+        assert checkpoint.read_bytes() == b"checkpoint"
+
+        renamed = client.post("/simulation/policies/name", json={
+            "model_name": "live-example/ppo_final.zip",
+            "display_name": "Survival v2",
+        })
+        assert renamed.status_code == 200, renamed.text
+        assert client.get("/simulation/policies").json()["names"] == {
+            "live-example/ppo_final.zip": "Survival v2",
+        }
+        assert client.post("/simulation/policies/name", json={
+            "model_name": "missing.zip",
+            "display_name": "Missing",
+        }).status_code == 404
+        assert client.post("/simulation/policies/name", json={
+            "model_name": "live-example/ppo_final.zip",
+            "display_name": "   ",
+        }).status_code == 422
+
+
+def test_delete_policy_removes_only_the_selected_checkpoint(tmp_path, monkeypatch) -> None:
+    run = tmp_path / "run"
+    run.mkdir()
+    checkpoint = run / "ppo_final.zip"
+    checkpoint.touch()
+    sibling = run / "ppo_512_steps.zip"
+    sibling.write_bytes(b"other checkpoint")
+    config = run / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(tmp_path))
+
+    with TestClient(app) as client:
+        body = {"model_name": "run/ppo_final.zip"}
+        assert client.post("/simulation/policies/name", json={**body, "display_name": "Final"}).status_code == 200
+        response = client.post("/simulation/policies/delete", json=body)
+        assert response.status_code == 200, response.text
+        assert response.json() == body
+        assert not checkpoint.exists()
+        assert sibling.read_bytes() == b"other checkpoint"
+        assert config.read_text(encoding="utf-8") == "{}"
+        assert client.get("/simulation/policies").json() == {
+            "configured": True, "policies": ["run/ppo_512_steps.zip"], "names": {},
+        }
+        assert client.post("/simulation/policies/delete", json=body).status_code == 404
+        assert client.post("/simulation/policies/delete", json={"model_name": "../other.zip"}).status_code == 422
 
 
 def test_live_training_streams_snapshots_and_loads_saved_policy(tmp_path, monkeypatch) -> None:

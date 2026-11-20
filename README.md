@@ -224,21 +224,28 @@ from `http://localhost:3000` and `http://127.0.0.1:3000`; set
 `NEXT_PUBLIC_API_URL` before starting Next.js to change the backend HTTP URL
 (the WebSocket URL is derived from it).
 
-Install `.[learning,web]` instead of `.[web]` to enable PPO policy playback
+Install `.[learning,web]` instead of `.[web]` to enable running PPO policies
 and live training. Before starting the backend, set `ADAPTIVE_AI_MODELS_DIR`
 to a trusted directory for checkpoints and training runs. For example, in
 PowerShell from the repository root: `$env:ADAPTIVE_AI_MODELS_DIR = ".\runs"`.
 
-- **Manual control:** Pause playback, choose an action, and click **Step once**.
+- **Manual control:** Pause the simulation, choose an action, and click **Step once**.
   The selected action is used instead of the policy. **Reset world** starts a
   new episode.
-- **Playback:** Choose a checkpoint from **Saved policy**, click **Load policy**,
+- **Run simulation:** Choose a checkpoint from **Saved policy**, click **Load policy**,
   then **Run policy**. This does not train the policy. If no policy is loaded,
   **Run idle simulation** advances the world using `IDLE` on every step.
+  Use the **Policies** tab to name or rename saved checkpoints; these labels are
+  stored in `.policy-names.json` in the models directory and do not rename or
+  modify checkpoint files.
+  To permanently remove a saved checkpoint, click **Delete** and confirm in the
+  popup. Only the selected `.zip` is removed; other checkpoints and their
+  shared `config.json` stay in place. A policy already loaded in memory can
+  still be used until it is replaced or the backend restarts.
   To add an existing checkpoint, place the `.zip` and its `config.json` together
   in the models directory or a subdirectory, then click **Refresh policies**.
   PPO checkpoints use Python serialization; only add files you trust.
-- **Training:** While playback is paused, choose a budget in **Steps** or
+- **Training:** While the simulation is paused, choose a budget in **Steps** or
   **Episodes** and click **Start live training**. **Max steps per episode**
   sets the time limit for this run only; leave it blank to use the current
   world's limit. An episode can still end early if the rabbit starves.
@@ -263,7 +270,11 @@ Ordinary `train.py` remains headless and independent of the web service.
   7 and is rejected with HTTP 409 while running; speed accepts `1`, `2`, `5`,
   or `10`.
 - `GET /simulation/policies` lists checkpoint names relative to the configured
-  models directory without loading them.
+  models directory without loading them, including any saved display names.
+- `POST /simulation/policies/name` saves a display name for a checkpoint without
+  changing its filename or contents.
+- `POST /simulation/policies/delete` accepts a relative `model_name` and
+  permanently removes only that saved checkpoint.
 - `POST /simulation/policy` loads a checkpoint by relative filename from the configured
   local models directory and adopts its saved adjacent `config.json`. Candidate
   policies load off the event loop, and are installed only after their Gym

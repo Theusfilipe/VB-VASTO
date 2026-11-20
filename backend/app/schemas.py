@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Schema(BaseModel):
@@ -125,6 +125,16 @@ class PolicyRequest(Schema):
 class PolicyCatalog(Schema):
     configured: bool
     policies: tuple[str, ...] = ()
+    names: dict[str, str] = Field(default_factory=dict)
+
+
+class PolicyNameRequest(PolicyRequest):
+    display_name: str = Field(min_length=1, max_length=80)
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def strip_display_name(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class TrainingRequest(Schema):

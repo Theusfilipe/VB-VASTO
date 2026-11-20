@@ -26,10 +26,13 @@ button { cursor: pointer; }
 button:disabled, select:disabled { cursor: not-allowed; opacity: .48; }
 
 .dashboard-shell { width: min(1440px, 100%); margin: 0 auto; padding: 0 42px 28px; }
-.topbar { height: 66px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.topbar { min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--ink); text-decoration: none; font-weight: 700; font-size: 15px; letter-spacing: -.5px; }
 .brand-mark { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #52705a; border-radius: 7px; font-size: 15px; }
 .brand-light { color: #839087; font-weight: 400; }
+.topbar-tabs { align-self: stretch; display: flex; align-items: stretch; gap: 6px; }
+.topbar-tab { display: inline-flex; align-items: center; padding: 0 12px; border-bottom: 2px solid transparent; color: #7f8a82; text-decoration: none; font-size: 11px; }
+.topbar-tab:hover, .topbar-tab.active { border-bottom-color: #63866a; color: #47664d; }
 .topbar-meta { display: flex; align-items: center; gap: 9px; color: #7f8a82; font-size: 11px; }
 .topbar-meta i, .world-status i, .footer i { height: 12px; border-left: 1px solid #dce2dc; }
 .connection-dot, .live-dot { height: 7px; width: 7px; border-radius: 50%; background: #c79d64; }
@@ -126,6 +129,27 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
 .error-banner { display: flex; align-items: center; gap: 12px; margin: -7px 0 14px; padding: 10px 12px; border: 1px solid #efdfcd; border-radius: 6px; background: #fffaf3; color: #856744; font-size: 10px; }
 .error-banner span { color: #a07a4d; font-weight: 700; }
 .error-banner button { margin-left: auto; border: 0; background: transparent; color: #56785d; font-size: 10px; font-weight: 700; }
+.success-message { margin: -7px 0 14px; color: #47664d; font-size: 11px; }
+.policy-list { display: grid; gap: 12px; }
+.policy-card { display: grid; gap: 16px; padding: 18px 20px; }
+.policy-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+.policy-card-heading .section-label { margin-bottom: 5px; }
+.policy-card-heading h2 { overflow-wrap: anywhere; }
+.policy-card-heading code { overflow: hidden; color: #8a958c; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.policy-name-field { display: grid !important; gap: 5px !important; align-items: start !important; }
+.policy-name-field input { width: min(30rem, 70vw); }
+.policy-empty { padding: 28px; color: #7f8a82; font-size: 12px; line-height: 1.6; }
+.policy-empty code { color: #56785d; }
+.button-delete { background: #fff; border-color: #eedcdc; color: #a13636; }
+.button-delete:hover:not(:disabled) { background: #fff3f3; }
+.button-danger { background: #a13636; color: #fff; }
+.button-danger:hover:not(:disabled) { background: #862b2b; }
+.policy-dialog { margin: auto; width: min(420px, calc(100% - 32px)); padding: 20px; color: var(--ink); }
+.policy-dialog::backdrop { background: rgb(38 51 44 / 40%); }
+.policy-dialog p { margin: 10px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.policy-dialog code { overflow-wrap: anywhere; }
+.policy-dialog .control-row { justify-content: flex-end; margin-top: 16px; }
+.policy-delete-error { color: #a13636; }
 .footer { display: flex; justify-content: space-between; padding-top: 21px; color: #9aa39c; font-size: 9px; }
 .footer > span:first-child { letter-spacing: .8px; }
 .footer > span:last-child { display: flex; align-items: center; gap: 9px; }
@@ -138,6 +162,9 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
 
 @media (max-width: 700px) {
   .dashboard-shell { padding-right: 14px; padding-left: 14px; }
+  .topbar { gap: 6px; }
+  .topbar-tabs { gap: 0; }
+  .topbar-tab { padding: 0 7px; font-size: 10px; }
   .topbar-meta { font-size: 0; }
   .topbar-meta i, .topbar-meta i + * { display: none; }
   .page-intro { align-items: start; }
@@ -148,5 +175,8 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
   .inspector-panel { min-height: 280px; }
   .world-legend { flex-wrap: wrap; gap: 11px 15px; padding: 7px 0; }
   .metrics-grid { grid-template-columns: 1fr; }
+  .policy-card-heading { align-items: start; flex-direction: column; gap: 8px; }
+  .policy-name-field { width: 100%; }
+  .policy-name-field input { width: 100%; }
   .footer { gap: 12px; font-size: 8px; }
 }

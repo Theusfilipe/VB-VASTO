@@ -61,6 +61,7 @@ export type SimulationConfig = {
 export type PolicyCatalog = {
   configured: boolean;
   policies: string[];
+  names: Record<string, string>;
 };
 
 export const API_URL =
