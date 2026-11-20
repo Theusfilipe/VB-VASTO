@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
@@ -12,7 +13,7 @@ from adaptive_ai.environments.rabbit_survival.observations import LocalObservati
 from adaptive_ai.environments.rabbit_survival.rewards import survival_reward
 from adaptive_ai.environments.rabbit_survival.world import World
 from adaptive_ai.mechanics.inventory import Inventory
-from adaptive_ai.mechanics.metabolism import Metabolism
+from adaptive_ai.mechanics.metabolism import Metabolism, MetabolismConfig
 
 if TYPE_CHECKING:
     from adaptive_ai.visualization.renderer import RabbitRenderer
@@ -50,6 +51,18 @@ class RabbitSurvivalEnv(gym.Env[Observation, int]):
         if self.render_mode == "human":
             self.render()
         return self.observer.observe(self.rabbit, self.world), self._info()
+
+    def update_metabolism(self, config: MetabolismConfig) -> Observation:
+        """Change an initialized rabbit's rates without advancing or restarting its episode."""
+        if not hasattr(self, "rabbit"):
+            raise gym.error.ResetNeeded("Call reset() before updating the active rabbit")
+        self.config = replace(self.config, metabolism=config)
+        self.world.config = self.config
+        metabolism = self.rabbit.metabolism
+        metabolism.config = config
+        metabolism.energy = min(metabolism.energy, config.max_energy)
+        metabolism.fatigue = min(metabolism.fatigue, config.max_fatigue)
+        return self.observer.observe(self.rabbit, self.world)
 
     def step(self, action: int) -> tuple[Observation, float, bool, bool, dict[str, Any]]:
         if self._needs_reset:

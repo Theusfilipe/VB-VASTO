@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.manager import SNAPSHOT_RATE, SimulationManager
 from backend.app.schemas import (
+    MetabolismConfigSchema,
     OperationResult,
     PolicyCatalog,
     PolicyNameRequest,
@@ -42,7 +43,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("DASHBOARD_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(","),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "PATCH", "POST"],
     allow_headers=["Content-Type"],
 )
 
@@ -59,6 +60,26 @@ async def get_state(request: Request) -> SimulationSnapshot:
 @app.get("/simulation/config", response_model=SimulationConfig)
 async def get_config(request: Request) -> SimulationConfig:
     return SimulationConfig.model_validate(await manager_from(request).configuration())
+
+
+@app.patch("/simulation/config/metabolism", response_model=MetabolismConfigSchema)
+async def update_metabolism(body: MetabolismConfigSchema, request: Request) -> MetabolismConfigSchema:
+    try:
+        updated = await manager_from(request).update_metabolism(body.model_dump(exclude_unset=True))
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return MetabolismConfigSchema.model_validate(updated, from_attributes=True)
+
+
+@app.post("/simulation/config/metabolism/reset", response_model=MetabolismConfigSchema)
+async def reset_metabolism(request: Request) -> MetabolismConfigSchema:
+    try:
+        defaults = await manager_from(request).update_metabolism(None)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return MetabolismConfigSchema.model_validate(defaults, from_attributes=True)
 
 
 @app.post("/simulation/start", response_model=SimulationSnapshot)

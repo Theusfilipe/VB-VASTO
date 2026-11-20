@@ -95,6 +95,63 @@ def test_snapshot_is_immutable() -> None:
             raise AssertionError("agent snapshots must be immutable")
 
 
+def test_metabolism_patch_preserves_episode_and_policy_and_changes_next_step() -> None:
+    with TestClient(app) as client:
+        manager = client.app.state.simulation
+        # A loaded policy is opaque to this operation, including its optimizer state.
+        policy = manager.policy = object()
+        space = manager.env.observation_space
+        actions = manager.env.action_space
+        before = client.post("/simulation/step", json={"action": 0}).json()["snapshot"]
+        initial = client.get("/simulation/config").json()
+        updated = client.patch("/simulation/config/metabolism", json={
+            "max_energy": 20, "max_fatigue": 20, "basal_energy_cost": 2,
+            "awake_fatigue_gain": 2, "sleep_recovery": 1,
+        })
+        assert updated.status_code == 200, updated.text
+        settings = client.get("/simulation/config").json()
+        assert settings == initial | {"metabolism": initial["metabolism"] | {
+            "max_energy": 20, "max_fatigue": 20, "basal_energy_cost": 2,
+            "awake_fatigue_gain": 2, "sleep_recovery": 1,
+        }}
+        after = client.get("/simulation/state").json()
+        for key in ("episode", "simulation_step", "metrics", "resources", "cumulative_reward"):
+            assert after[key] == before[key]
+        agent = after["agents"][0]
+        assert agent["identifier"] == before["agents"][0]["identifier"]
+        assert (agent["energy"], agent["fatigue"]) == (20, 0.75)
+        assert manager.observation[:2] == approx([1, 0.75 / 20])
+        assert manager.policy is policy
+        assert manager.env.observation_space is space and manager.env.action_space is actions
+
+        awake = client.post("/simulation/step", json={"action": 0}).json()["snapshot"]["agents"][0]
+        assert (awake["energy"], awake["fatigue"]) == (18, 2.75)
+        sleeping = client.post("/simulation/step", json={"action": 7}).json()["snapshot"]["agents"][0]
+        assert (sleeping["energy"], sleeping["fatigue"]) == (17.5, 1.75)
+
+        reset = client.post("/simulation/config/metabolism/reset")
+        assert reset.json() == initial["metabolism"]
+        assert client.get("/simulation/state").json()["agents"][0]["energy"] == 17.5
+        assert manager.policy is policy
+
+
+def test_metabolism_patch_validates_against_current_settings_atomically() -> None:
+    with TestClient(app) as client:
+        assert client.patch("/simulation/config/metabolism", json={"sleep_energy_cost": 0.1}).is_success
+        assert client.patch("/simulation/config/metabolism", json={"basal_energy_cost": 0.2}).is_success
+        saved = client.get("/simulation/config").json()
+        state = client.get("/simulation/state").json()
+        for invalid in ({"sleep_energy_cost": 0.3}, {"max_energy": 0}, {"perception_radius": 2}):
+            rejected = client.patch("/simulation/config/metabolism", json=invalid)
+            assert rejected.status_code == 422, rejected.text
+            assert client.get("/simulation/config").json() == saved
+            assert client.get("/simulation/state").json() == state
+
+        assert client.post("/simulation/start").is_success
+        assert client.patch("/simulation/config/metabolism", json={"max_fatigue": 8}).is_success
+        assert client.get("/simulation/state").json()["status"] == "running"
+
+
 def test_training_requires_optional_dependencies_and_configured_output(monkeypatch) -> None:
     monkeypatch.delenv("ADAPTIVE_AI_MODELS_DIR", raising=False)
     with TestClient(app) as client:
