@@ -1,4 +1,5 @@
 # VB-VASTO
+
 VB-VASTO (Virtual Biology — Vision, Audition, Somatic, Taste, Olfaction) is an artificial life framework exploring the emergence of autonomous animal behavior through sensory perception, deep learning, reinforcement learning, and neuroevolution in simulated ecosystems.
 
 The initial `adaptive_ai` release is a single-rabbit Gymnasium simulation and a
@@ -7,25 +8,67 @@ a game engine, a policy, or a display.
 
 ## Install
 
-Use Python 3.12 or newer. From the repository root, activate an existing virtual
-environment or create one with `python -m venv .venv` and `source .venv/bin/activate`.
-Then install the package with:
+Use Python 3.12 or newer. From the repository root, activate an existing
+virtual environment or create one as shown below.
+
+**Windows (PowerShell):**
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+If `python` already works on Windows, you can also use `python -m venv .venv`.
+If it opens the Microsoft Store, use `py` to create the environment.
+
+**macOS or Linux:**
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+With the environment active, **pick one** of these blocks to install the
+package and run the tests.
+
+**Using `python`:**
 
 ```sh
 python -m pip install -e '.[learning,visualization,test]'
 python -m pytest
 ```
 
-For simulation only, install with `python -m pip install -e .`. For headless PPO
-you can omit the `visualization` extra and the `--plot` and `--render` flags.
+**Using `py` (Windows):**
+
+```powershell
+py -m pip install -e '.[learning,visualization,test]'
+py -m pytest
+```
+
+For simulation only, use `python -m pip install -e .` or `py -m pip install -e .`
+on Windows. For headless PPO you can omit the `visualization` extra and the
+`--plot` and `--render` flags.
 
 ## Train, resume, and evaluate
 
-```sh
+Choose the block matching your Python command.
+
+**Using `python`:**
+
+```Shell
 python train.py --steps 150000 --seed 0 --output runs/rabbit --plot
 python evaluate.py runs/rabbit/ppo_final.zip --episodes 20 --seed 0
 python evaluate.py runs/rabbit/ppo_final.zip --episodes 1 --render
 python train.py --resume runs/rabbit/ppo_final.zip --steps 50000 --seed 1 --output runs/rabbit-resumed --plot
+```
+
+**Using `py` (Windows):**
+
+```powershell
+py train.py --steps 150000 --seed 0 --output runs\rabbit --plot
+py evaluate.py runs\rabbit\ppo_final.zip --episodes 20 --seed 0
+py evaluate.py runs\rabbit\ppo_final.zip --episodes 1 --render
+py train.py --resume runs\rabbit\ppo_final.zip --steps 50000 --seed 1 --output runs\rabbit-resumed --plot
 ```
 
 Each invocation of `train.py` requires a new output directory. It checks the
@@ -58,8 +101,7 @@ steps per episode. Results can vary by seed and configuration.
 
 By default, the world is a 5 × 5 grid with 8 plant cells and a 200-step time
 limit. Reset samples the starting cells and rabbit position using Gymnasium's
-seeded random generator. Below the target plant count (`ceil(width × height ×
-resource_density)`), each tick has a 25% chance to regenerate one plant at a
+seeded random generator. Below the target plant count (`ceil(width × height × resource_density)`), each tick has a 25% chance to regenerate one plant at a
 uniformly sampled empty cell. The rabbit's opaque UUID is deliberately
 independent of the simulation seed and never enters policy observations.
 
