@@ -62,6 +62,9 @@ export function Dashboard() {
   const [action, setAction] = useState(0);
   const [seed, setSeed] = useState("0");
   const [trainingSteps, setTrainingSteps] = useState("150000");
+  const [trainingEpisodes, setTrainingEpisodes] = useState("100");
+  const [trainingBudget, setTrainingBudget] = useState<"steps" | "episodes">("steps");
+  const [trainingEpisodeLimit, setTrainingEpisodeLimit] = useState("");
   const [trainingSeed, setTrainingSeed] = useState("0");
   const [policyName, setPolicyName] = useState("");
   const [catalog, setCatalog] = useState<PolicyCatalog | null>(null);
@@ -169,14 +172,21 @@ export function Dashboard() {
   const activePolicy = snapshot?.policy_name;
   const blocked = !snapshot || busy;
   const totalSteps = Number(trainingSteps);
+  const totalEpisodes = Number(trainingEpisodes);
+  const episodeLimit = trainingEpisodeLimit === "" ? undefined : Number(trainingEpisodeLimit);
   const validTrainingSteps = Number.isInteger(totalSteps) && totalSteps >= 512 && totalSteps <= 5000000;
+  const validTrainingEpisodes = Number.isInteger(totalEpisodes) && totalEpisodes >= 1 && totalEpisodes <= 10000;
+  const validEpisodeLimit = episodeLimit === undefined
+    || (Number.isInteger(episodeLimit) && episodeLimit >= 1 && episodeLimit <= 10000);
   const parsedTrainingSeed = Number(trainingSeed);
   const validTrainingSeed = Number.isInteger(parsedTrainingSeed) && parsedTrainingSeed >= 0
     && parsedTrainingSeed <= 4294967295;
   const trainingHint = !snapshot ? "Waiting for a connection to the simulation backend."
     : running && !liveTraining ? "Pause playback before starting training."
     : catalog?.configured === false ? "Restart the backend with ADAPTIVE_AI_MODELS_DIR set to a trusted checkpoint directory."
-    : !validTrainingSteps ? "Enter a whole number of training steps from 512 to 5,000,000."
+    : trainingBudget === "steps" && !validTrainingSteps ? "Enter a whole number of training steps from 512 to 5,000,000."
+    : trainingBudget === "episodes" && !validTrainingEpisodes ? "Enter a whole number of episodes from 1 to 10,000."
+    : !validEpisodeLimit ? "Enter a whole-number episode limit from 1 to 10,000."
     : !validTrainingSeed ? "Enter a whole-number seed from 0 to 4,294,967,295."
     : null;
 
@@ -206,7 +216,7 @@ export function Dashboard() {
 
       <section className="page-intro">
         <div><p className="eyebrow">OBSERVATION STUDIO <span>•</span> RABBIT SURVIVAL</p><h1>Simulation dashboard</h1><p className="intro-copy">A live view into agent behavior and environmental state.</p></div>
-        <div className="episode-badge"><span>EPISODE</span><b>{snapshot?.episode ?? "—"}</b><i />{trainingRunning ? "LIVE TRAINING" : completedRun ? "TRAINING ENDED" : running ? activePolicy ? "POLICY PLAYBACK" : "IDLE PLAYBACK" : "PAUSED"}</div>
+        <div className="episode-badge"><span>{liveTraining ? "EPISODES COMPLETED" : "EPISODE"}</span><b>{(liveTraining ? snapshot?.training_episodes : snapshot?.episode) ?? "—"}</b><i />{trainingRunning ? "LIVE TRAINING" : completedRun ? "TRAINING ENDED" : running ? activePolicy ? "POLICY PLAYBACK" : "IDLE PLAYBACK" : "PAUSED"}</div>
       </section>
 
       {error && <div className="error-banner" role="status"><span>Connection notice</span>{error}<button onClick={() => window.location.reload()}>Retry</button></div>}
@@ -258,18 +268,28 @@ export function Dashboard() {
             <section className="control-section" aria-labelledby="training-heading">
               <h3 id="training-heading">Training</h3>
               <p>Train a new PPO policy in a separate simulation. Load its saved checkpoint under Playback to use it.</p>
+              <p>{trainingBudget === "steps" ? "PPO finishes its current rollout, so the step budget is a minimum." : "Training stops at the requested number of completed episodes. PPO only learns from full rollouts, so very short runs may save a policy before its first update."}</p>
               <div className="control-row">
-                <label>Training steps <input type="number" min={512} max={5000000} value={trainingSteps} onChange={(event) => setTrainingSteps(event.target.value)} disabled={trainingRunning} /></label>
+                <label>Training budget <select className="action-select" value={trainingBudget} onChange={(event) => setTrainingBudget(event.target.value === "episodes" ? "episodes" : "steps")} disabled={trainingRunning}><option value="steps">Steps</option><option value="episodes">Episodes</option></select></label>
+                {trainingBudget === "steps"
+                  ? <label>Training steps <input type="number" min={512} max={5000000} value={trainingSteps} onChange={(event) => setTrainingSteps(event.target.value)} disabled={trainingRunning} /></label>
+                  : <label>Training episodes <input type="number" min={1} max={10000} value={trainingEpisodes} onChange={(event) => setTrainingEpisodes(event.target.value)} disabled={trainingRunning} /></label>}
+                <label>Max steps per episode <input type="number" min={1} max={10000} value={trainingEpisodeLimit} placeholder="Use world limit" onChange={(event) => setTrainingEpisodeLimit(event.target.value)} disabled={trainingRunning} /></label>
                 <label>Training seed <input type="number" min={0} max={4294967295} value={trainingSeed} onChange={(event) => setTrainingSeed(event.target.value)} disabled={trainingRunning} /></label>
                 {trainingRunning
                   ? <button className="button button-outline" disabled={blocked} onClick={() => void control("/training/stop")}>{trainingRequest === "stopping" ? "Stopping training…" : "Stop training"}</button>
-                  : <button className="button button-primary" disabled={blocked || running || trainingHint !== null} onClick={() => void control("/training/start", { total_steps: totalSteps, seed: parsedTrainingSeed })}>{trainingRequest === "starting" ? "Starting training…" : "Start live training"}</button>}
+                  : <button className="button button-primary" disabled={blocked || running || trainingHint !== null} onClick={() => void control("/training/start", {
+                    ...(trainingBudget === "steps" ? { total_steps: totalSteps } : { total_episodes: totalEpisodes }),
+                    max_episode_steps: episodeLimit,
+                    seed: parsedTrainingSeed,
+                  })}>{trainingRequest === "starting" ? "Starting training…" : "Start live training"}</button>}
                 {completedRun && <button className="button button-outline" disabled={blocked} onClick={() => void control("/simulation/pause")}>Return to simulation</button>}
               </div>
               {!trainingRunning && trainingHint && <p role="status">{trainingHint}</p>}
               {trainingError && <p role="alert"><strong>Training request failed:</strong> {trainingError}</p>}
               {snapshot?.training_error && <p role="alert"><strong>Training stopped unexpectedly:</strong> {snapshot.training_error}</p>}
-              {liveTraining && snapshot?.training_timesteps != null && <p>{snapshot.training_timesteps.toLocaleString()} training steps · {snapshot.training_run}</p>}
+              <p>Episodes can end before the limit if the rabbit starves. Leave the limit blank to use the current world&apos;s setting.</p>
+              {liveTraining && snapshot?.training_timesteps != null && <p>{snapshot.training_timesteps.toLocaleString()} training steps · {snapshot.training_episodes?.toLocaleString()} completed episodes · {snapshot.training_episode_limit} steps max per episode · {snapshot.training_run}</p>}
             </section>
           </div>
         </div>

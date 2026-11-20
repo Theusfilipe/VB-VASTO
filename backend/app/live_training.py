@@ -17,18 +17,23 @@ PREFIX = "ADAPTIVE_AI_SNAPSHOT:"
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train PPO and stream throttled simulation snapshots.")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--steps", type=int, required=True)
+    budget = parser.add_mutually_exclusive_group(required=True)
+    budget.add_argument("--steps", type=int)
+    budget.add_argument("--episodes", type=int)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--stop-file", type=Path, required=True)
     args = parser.parse_args()
 
     config = read_config(args.output / "config.json")
+    total_steps = args.steps if args.episodes is None else args.episodes * config.max_episode_steps
     metrics: list[EpisodeMetric] = []
     episode_number = 1
 
     def emit(env: Env, timesteps: int, infos: list[dict[str, Any]], running: bool) -> None:
         nonlocal episode_number
         simulation = env.unwrapped
+        if not isinstance(simulation, RabbitSurvivalEnv):
+            raise TypeError("Live training snapshots require a RabbitSurvivalEnv")
         for info in infos:
             completed = info.get("episode")
             if not completed:
@@ -57,6 +62,8 @@ def main() -> None:
             execution_mode="training",
             training_run=args.output.name,
             training_timesteps=timesteps,
+            training_episodes=episode_number - 1,
+            training_episode_limit=config.max_episode_steps,
         )
         print(PREFIX + snapshot.model_dump_json(), flush=True)
 
@@ -66,8 +73,9 @@ def main() -> None:
         env.reset(seed=args.seed)
         emit(env, 0, [], True)
         train_ppo(
-            env, args.output, total_steps=args.steps, seed=args.seed,
-            checkpoint_every=max(512, min(25_000, args.steps)),
+            env, args.output, total_steps=total_steps, seed=args.seed,
+            checkpoint_every=max(512, min(25_000, total_steps)),
+            total_episodes=args.episodes,
             episode_metrics=("food_eaten", "sleep_steps", "move_steps"),
             snapshot_callback=emit,
             stop_file=args.stop_file,

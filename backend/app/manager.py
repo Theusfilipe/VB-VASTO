@@ -1,20 +1,17 @@
 import asyncio
-import json
 import logging
 import subprocess
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from adaptive_ai.environments.rabbit_survival import RabbitSurvivalConfig, RabbitSurvivalEnv
 from adaptive_ai.environments.rabbit_survival.actions import Action
-from adaptive_ai.environments.rabbit_survival.config import RewardConfig
-from adaptive_ai.mechanics.metabolism import MetabolismConfig
-from gymnasium import spaces
-from adaptive_ai.environments.rabbit_survival.run_config import write_config
+from adaptive_ai.environments.rabbit_survival.run_config import read_config, write_config
+from gymnasium.spaces.utils import flatdim
 
 from backend.app.schemas import EpisodeMetric, OperationResult, SimulationSnapshot
 from backend.app.snapshot import snapshot_from_env
@@ -117,7 +114,8 @@ class SimulationManager:
             return await asyncio.to_thread(self._install_policy, *candidate, model_name)
 
     async def start_live_training(
-        self, total_steps: int, seed: int, models_directory: Path,
+        self, total_steps: int | None, seed: int, models_directory: Path, *,
+        total_episodes: int | None = None, max_episode_steps: int | None = None,
     ) -> SimulationSnapshot:
         async with self._lock:
             self._ensure_training_stopped()
@@ -125,19 +123,26 @@ class SimulationManager:
                 raise RuntimeError("Pause the simulation before starting live training")
             run_name = f"live-{uuid4().hex[:12]}"
             output = models_directory / run_name
+            config = self.config if max_episode_steps is None else replace(
+                self.config, max_episode_steps=max_episode_steps,
+            )
             await asyncio.to_thread(output.mkdir, parents=True, exist_ok=False)
-            await asyncio.to_thread(write_config, output / "config.json", self.config)
+            await asyncio.to_thread(write_config, output / "config.json", config)
             stop_file = output / "STOP"
             training_snapshot = self._snapshot().model_copy(update={
                 "status": "running", "execution_mode": "training",
                 "training_run": run_name, "training_timesteps": 0,
+                "training_episodes": 0, "training_episode_limit": config.max_episode_steps,
             })
             repository_root = Path(__file__).resolve().parents[2]
+            budget_args = ["--episodes", str(total_episodes)] if total_episodes is not None else [
+                "--steps", str(total_steps if total_steps is not None else 150_000),
+            ]
             process = await asyncio.to_thread(
                 subprocess.Popen,
                 [
                     sys.executable, "-m", "backend.app.live_training",
-                    "--output", str(output), "--steps", str(total_steps), "--seed", str(seed),
+                    "--output", str(output), *budget_args, "--seed", str(seed),
                     "--stop-file", str(stop_file),
                 ],
                 cwd=repository_root,
@@ -278,18 +283,12 @@ class SimulationManager:
     ) -> tuple[RabbitSurvivalEnv, Any, Any, RabbitSurvivalConfig]:
         from stable_baselines3 import PPO
 
-        with model_path.with_name("config.json").open(encoding="utf-8") as stream:
-            config_data = json.load(stream)
-        if not isinstance(config_data, dict):
-            raise ValueError("The model's config.json must contain a JSON object")
-        config_data["metabolism"] = MetabolismConfig(**config_data.get("metabolism", {}))
-        config_data["rewards"] = RewardConfig(**config_data.get("rewards", {}))
-        config = RabbitSurvivalConfig(**config_data)
+        config = read_config(model_path.with_name("config.json"))
         candidate_env = RabbitSurvivalEnv(config)
         observation, _ = candidate_env.reset(seed=0)
         try:
             model = PPO.load(model_path, device="cpu")
-            if not spaces.utils.flatdim(model.observation_space) == spaces.utils.flatdim(candidate_env.observation_space):
+            if flatdim(model.observation_space) != flatdim(candidate_env.observation_space):
                 raise ValueError("Policy observation space does not match its saved simulation config")
             if model.action_space != candidate_env.action_space:
                 raise ValueError("Policy action space does not match this simulation")

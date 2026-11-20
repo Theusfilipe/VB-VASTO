@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Schema(BaseModel):
@@ -98,6 +98,8 @@ class SimulationSnapshot(Schema):
     policy_name: str | None = None
     training_run: str | None = None
     training_timesteps: int | None = None
+    training_episodes: int | None = None
+    training_episode_limit: int | None = None
     training_error: str | None = None
 
 
@@ -126,8 +128,16 @@ class PolicyCatalog(Schema):
 
 
 class TrainingRequest(Schema):
-    total_steps: int = Field(default=150_000, ge=512, le=5_000_000)
+    total_steps: int | None = Field(default=None, ge=512, le=5_000_000)
+    total_episodes: int | None = Field(default=None, ge=1, le=10_000)
+    max_episode_steps: int | None = Field(default=None, ge=1, le=10_000)
     seed: int = Field(default=0, ge=0, le=2**32 - 1)
+
+    @model_validator(mode="after")
+    def check_budget(self) -> "TrainingRequest":
+        if self.total_steps is not None and self.total_episodes is not None:
+            raise ValueError("Choose either a step budget or an episode budget")
+        return self
 
 
 class OperationResult(Schema):

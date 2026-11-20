@@ -161,7 +161,10 @@ async def start_live_training(body: TrainingRequest, request: Request) -> Simula
     root = Path(models_directory).expanduser().resolve()
     try:
         root.mkdir(parents=True, exist_ok=True)
-        return await manager_from(request).start_live_training(body.total_steps, body.seed, root)
+        return await manager_from(request).start_live_training(
+            body.total_steps, body.seed, root,
+            total_episodes=body.total_episodes, max_episode_steps=body.max_episode_steps,
+        )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OSError as error:

@@ -22,6 +22,8 @@ def snapshot_from_env(
     policy_name: str | None = None,
     training_run: str | None = None,
     training_timesteps: int | None = None,
+    training_episodes: int | None = None,
+    training_episode_limit: int | None = None,
 ) -> SimulationSnapshot:
     rabbit = env.rabbit
     agent = AgentSnapshot(
@@ -58,4 +60,6 @@ def snapshot_from_env(
         policy_name=policy_name,
         training_run=training_run,
         training_timesteps=training_timesteps,
+        training_episodes=training_episodes,
+        training_episode_limit=training_episode_limit,
     )

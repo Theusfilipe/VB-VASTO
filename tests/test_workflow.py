@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import subprocess
 import sys
@@ -11,6 +12,47 @@ from adaptive_ai.environments.rabbit_survival.actions import Action
 from adaptive_ai.environments.rabbit_survival.run_config import read_config, write_config
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_live_training_episode_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("stable_baselines3")
+    fastapi = pytest.importorskip("fastapi")
+    from backend.app.main import app, get_config, get_state, start_live_training
+    from backend.app.schemas import TrainingRequest
+
+    monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(tmp_path))
+
+    async def verify() -> None:
+        async with app.router.lifespan_context(app):
+            request = fastapi.Request({"type": "http", "app": app})
+            previous_config = await get_config(request)
+            started = await start_live_training(
+                TrainingRequest(total_episodes=260, max_episode_steps=2, seed=17), request,
+            )
+            assert started.training_episodes == 0
+            assert started.training_episode_limit == 2
+            assert started.training_run is not None
+            async with asyncio.timeout(60):
+                latest = await get_state(request)
+                while latest.status == "running":
+                    await asyncio.sleep(0.05)
+                    latest = await get_state(request)
+            assert latest.training_error is None
+            assert latest.training_episodes == 260
+            assert latest.training_timesteps == 520
+            assert await get_config(request) == previous_config
+
+            run = tmp_path / started.training_run
+            assert read_config(run / "config.json").max_episode_steps == 2
+            assert (run / "ppo_final.zip").is_file()
+            with (run / "monitor.csv").open(newline="", encoding="utf-8") as stream:
+                stream.readline()
+                assert [int(row["l"]) for row in csv.DictReader(stream)] == [2] * 260
+            with (run / "progress.csv").open(newline="", encoding="utf-8") as stream:
+                updates = list(csv.DictReader(stream))
+            assert [int(row["time/total_timesteps"]) for row in updates] == [512]
+
+    asyncio.run(verify())
 
 
 def test_invalid_config_fails_at_load(tmp_path: Path) -> None:

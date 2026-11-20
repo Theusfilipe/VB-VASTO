@@ -1,10 +1,9 @@
 # VB-VASTO
 
-VB-VASTO (Virtual Biology — Vision, Audition, Somatic, Taste, Olfaction) is an artificial life framework exploring the emergence of autonomous animal behavior through sensory perception, deep learning, reinforcement learning, and neuroevolution in simulated ecosystems.
-
-The initial `adaptive_ai` release is a single-rabbit Gymnasium simulation and a
-Stable-Baselines3 PPO workflow. Neither the rabbit nor the simulation depends on
-a game engine, a policy, or a display.
+VB-VASTO (Virtual Biology — Vision, Audition, Somatic, Taste, Olfaction) is an
+artificial life project built around a single-rabbit Gymnasium simulation. It
+includes a Stable-Baselines3 PPO workflow and an optional web dashboard. The
+simulation itself does not need a game engine, a policy, or a display.
 
 ## Install
 
@@ -151,7 +150,7 @@ under the default settings.
 
 ## Architecture
 
-- `core/` holds entity and transition types. `agents/` composes rabbit state
+- `core/` holds shared entity and observation types. `agents/` composes rabbit state
   from reusable `mechanics/` (metabolism and inventory) and `resources/`.
 - `environments/rabbit_survival/` owns the grid and the rules for executing
   actions, producing observations, and scoring transitions. Its Gymnasium
@@ -239,9 +238,15 @@ PowerShell from the repository root: `$env:ADAPTIVE_AI_MODELS_DIR = ".\runs"`.
   To add an existing checkpoint, place the `.zip` and its `config.json` together
   in the models directory or a subdirectory, then click **Refresh policies**.
   PPO checkpoints use Python serialization; only add files you trust.
-- **Training:** While playback is paused, set a **Training steps** budget (not
-  an episode count) and click **Start live training**. This trains a new PPO
-  policy in a separate environment and streams snapshots at most every 100 ms.
+- **Training:** While playback is paused, choose a budget in **Steps** or
+  **Episodes** and click **Start live training**. **Max steps per episode**
+  sets the time limit for this run only; leave it blank to use the current
+  world's limit. An episode can still end early if the rabbit starves.
+  The dashboard shows both training steps and completed episodes. A step
+  budget is a minimum because PPO finishes its current rollout. An episode
+  budget stops at the requested count; PPO does not learn from the unfinished
+  rollout, so very short runs may end before the first update.
+  Training uses a separate environment and streams snapshots at most every 100 ms.
   **Stop training** requests a graceful stop. When the run saves its final
   checkpoint, the policy list refreshes and selects it for loading. You can
   also choose **Return to simulation** to go back without loading it.
@@ -263,7 +268,8 @@ Ordinary `train.py` remains headless and independent of the web service.
   local models directory and adopts its saved adjacent `config.json`. Candidate
   policies load off the event loop, and are installed only after their Gym
   observation and action spaces match the simulation.
-- `POST /training/start` accepts `total_steps` and `seed` and starts an isolated
+- `POST /training/start` accepts either `total_steps` or `total_episodes`,
+  plus optional `max_episode_steps` and `seed`, and starts an isolated
   live PPO run; `POST /training/stop` requests a cooperative stop. Live training
   requires both the `learning` extra and `ADAPTIVE_AI_MODELS_DIR`.
 - `/ws/simulation` sends current snapshots at 10 Hz. It does not own or advance

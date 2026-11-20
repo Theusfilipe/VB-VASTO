@@ -5,7 +5,7 @@ from typing import Any
 
 from gymnasium import Env
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, StopTrainingOnMaxEpisodes
 from stable_baselines3.common.env_checker import check_env as check_sb3
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.monitor import Monitor
@@ -22,11 +22,14 @@ class _RolloutOutputs(BaseCallback):
         self.checkpoint_every = checkpoint_every
 
     def _on_training_start(self) -> None:
-        self.start_step = self.last_step = self.model.num_timesteps
+        self.start_step = self.last_step = self.completed_rollout_step = self.model.num_timesteps
         self.next_checkpoint = self.start_step + self.checkpoint_every
 
     def _on_rollout_start(self) -> None:
         self._write_update()
+
+    def _on_rollout_end(self) -> None:
+        self.completed_rollout_step = self.model.num_timesteps
 
     def _on_training_end(self) -> None:
         self._write_update()
@@ -35,7 +38,7 @@ class _RolloutOutputs(BaseCallback):
         return True
 
     def _write_update(self) -> None:
-        steps = self.model.num_timesteps
+        steps = self.completed_rollout_step
         if steps == self.last_step:
             return
         self.last_step = steps
@@ -87,6 +90,7 @@ def train_ppo(
     resume: Path | None = None,
     snapshot_callback: SnapshotCallback | None = None,
     stop_file: Path | None = None,
+    total_episodes: int | None = None,
 ) -> Path:
     """Train on a numerical Gymnasium environment. The caller owns its lifecycle."""
     check_sb3(env, skip_render_check=True)
@@ -102,6 +106,8 @@ def train_ppo(
             callbacks: list[BaseCallback] = [_RolloutOutputs(output, checkpoint_every)]
             if snapshot_callback is not None and stop_file is not None:
                 callbacks.append(_LiveSnapshotCallback(snapshot_callback, stop_file))
+            if total_episodes is not None:
+                callbacks.append(StopTrainingOnMaxEpisodes(total_episodes))
             model.set_logger(logger)
             model.learn(
                 total_timesteps=total_steps, reset_num_timesteps=resume is None,
