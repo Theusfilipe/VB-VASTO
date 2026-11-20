@@ -98,6 +98,7 @@ class SimulationSnapshot(Schema):
     policy_name: str | None = None
     training_run: str | None = None
     training_timesteps: int | None = None
+    training_error: str | None = None
 
 
 class StepRequest(Schema):

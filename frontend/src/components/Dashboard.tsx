@@ -70,6 +70,8 @@ export function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [trainingRequest, setTrainingRequest] = useState<"starting" | "stopping" | null>(null);
+  const [trainingError, setTrainingError] = useState<string | null>(null);
 
   const updateSnapshot = useCallback((next: SimulationSnapshot) => {
     setSnapshot(next);
@@ -136,14 +138,26 @@ export function Dashboard() {
   );
 
   async function control(path: string, body?: unknown) {
+    const trainingRequestType = path === "/training/start" ? "starting"
+      : path === "/training/stop" ? "stopping" : null;
+    if (trainingRequestType) {
+      setTrainingError(null);
+      setTrainingRequest(trainingRequestType);
+    }
     setBusy(true);
     setError(null);
     try {
       const result = await request<SimulationSnapshot | { snapshot: SimulationSnapshot }>(path, body ?? {});
       updateSnapshot("snapshot" in result ? result.snapshot : result);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Simulation request failed.");
+      const message = reason instanceof Error ? reason.message.trim() : "";
+      if (trainingRequestType) {
+        setTrainingError(message || "The backend rejected the training request without an error message. Check the backend terminal.");
+      } else {
+        setError(message || "Simulation request failed.");
+      }
     } finally {
+      if (trainingRequestType) setTrainingRequest(null);
       setBusy(false);
     }
   }
@@ -156,6 +170,15 @@ export function Dashboard() {
   const blocked = !snapshot || busy;
   const totalSteps = Number(trainingSteps);
   const validTrainingSteps = Number.isInteger(totalSteps) && totalSteps >= 512 && totalSteps <= 5000000;
+  const parsedTrainingSeed = Number(trainingSeed);
+  const validTrainingSeed = Number.isInteger(parsedTrainingSeed) && parsedTrainingSeed >= 0
+    && parsedTrainingSeed <= 4294967295;
+  const trainingHint = !snapshot ? "Waiting for a connection to the simulation backend."
+    : running && !liveTraining ? "Pause playback before starting training."
+    : catalog?.configured === false ? "Restart the backend with ADAPTIVE_AI_MODELS_DIR set to a trusted checkpoint directory."
+    : !validTrainingSteps ? "Enter a whole number of training steps from 512 to 5,000,000."
+    : !validTrainingSeed ? "Enter a whole-number seed from 0 to 4,294,967,295."
+    : null;
 
   useEffect(() => {
     let active = true;
@@ -239,10 +262,13 @@ export function Dashboard() {
                 <label>Training steps <input type="number" min={512} max={5000000} value={trainingSteps} onChange={(event) => setTrainingSteps(event.target.value)} disabled={trainingRunning} /></label>
                 <label>Training seed <input type="number" min={0} max={4294967295} value={trainingSeed} onChange={(event) => setTrainingSeed(event.target.value)} disabled={trainingRunning} /></label>
                 {trainingRunning
-                  ? <button className="button button-outline" disabled={blocked} onClick={() => void control("/training/stop")}>Stop training</button>
-                  : <button className="button button-primary" disabled={blocked || running || !validTrainingSteps || catalog?.configured === false} onClick={() => void control("/training/start", { total_steps: totalSteps, seed: Number(trainingSeed || 0) })}>Start live training</button>}
+                  ? <button className="button button-outline" disabled={blocked} onClick={() => void control("/training/stop")}>{trainingRequest === "stopping" ? "Stopping training…" : "Stop training"}</button>
+                  : <button className="button button-primary" disabled={blocked || running || trainingHint !== null} onClick={() => void control("/training/start", { total_steps: totalSteps, seed: parsedTrainingSeed })}>{trainingRequest === "starting" ? "Starting training…" : "Start live training"}</button>}
                 {completedRun && <button className="button button-outline" disabled={blocked} onClick={() => void control("/simulation/pause")}>Return to simulation</button>}
               </div>
+              {!trainingRunning && trainingHint && <p role="status">{trainingHint}</p>}
+              {trainingError && <p role="alert"><strong>Training request failed:</strong> {trainingError}</p>}
+              {snapshot?.training_error && <p role="alert"><strong>Training stopped unexpectedly:</strong> {snapshot.training_error}</p>}
               {liveTraining && snapshot?.training_timesteps != null && <p>{snapshot.training_timesteps.toLocaleString()} training steps · {snapshot.training_run}</p>}
             </section>
           </div>

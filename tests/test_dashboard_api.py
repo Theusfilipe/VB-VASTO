@@ -105,10 +105,10 @@ def test_training_requires_optional_dependencies_and_configured_output(monkeypat
 def test_live_training_launch_failure_keeps_previous_simulation_state(tmp_path, monkeypatch) -> None:
     import backend.app.manager as manager_module
 
-    async def fail_to_start(*args, **kwargs):
+    def fail_to_start(*args, **kwargs):
         raise OSError("process launch failed")
 
-    monkeypatch.setattr(manager_module.asyncio, "create_subprocess_exec", fail_to_start)
+    monkeypatch.setattr(manager_module.subprocess, "Popen", fail_to_start)
     monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(tmp_path))
     with TestClient(app) as client:
         response = client.post("/training/start", json={"total_steps": 512})

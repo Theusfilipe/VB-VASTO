@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import subprocess
 import sys
 import time
 from dataclasses import asdict
@@ -40,7 +41,7 @@ class SimulationManager:
         self._wake = asyncio.Event()
         self._runner: asyncio.Task[None] | None = None
         self._closed = False
-        self._training_process: asyncio.subprocess.Process | None = None
+        self._training_process: subprocess.Popen[bytes] | None = None
         self._training_task: asyncio.Task[None] | None = None
         self._training_snapshot: SimulationSnapshot | None = None
         self._training_stop_file: Path | None = None
@@ -132,13 +133,16 @@ class SimulationManager:
                 "training_run": run_name, "training_timesteps": 0,
             })
             repository_root = Path(__file__).resolve().parents[2]
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "backend.app.live_training",
-                "--output", str(output), "--steps", str(total_steps), "--seed", str(seed),
-                "--stop-file", str(stop_file),
+            process = await asyncio.to_thread(
+                subprocess.Popen,
+                [
+                    sys.executable, "-m", "backend.app.live_training",
+                    "--output", str(output), "--steps", str(total_steps), "--seed", str(seed),
+                    "--stop-file", str(stop_file),
+                ],
                 cwd=repository_root,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
             self._training_stop_file = stop_file
             self._training_process = process
@@ -154,12 +158,12 @@ class SimulationManager:
             process = self._training_process
             task = self._training_task
             stop_file = self._training_stop_file
-            if process is not None and process.returncode is None and stop_file is not None:
+            if process is not None and process.poll() is None and stop_file is not None:
                 await asyncio.to_thread(stop_file.touch, exist_ok=True)
         if task is not None:
             await task
         elif process is not None:
-            await process.wait()
+            await asyncio.to_thread(process.wait)
         return await self.snapshot()
 
     async def _run(self) -> None:
@@ -184,11 +188,12 @@ class SimulationManager:
             await asyncio.sleep(max(0, next_tick - time.monotonic()))
 
     async def _collect_live_training(
-        self, process: asyncio.subprocess.Process, run_name: str,
+        self, process: subprocess.Popen[bytes], run_name: str,
     ) -> None:
-        assert process.stdout is not None
+        if process.stdout is None:
+            raise RuntimeError("Live training worker stdout was not captured")
         prefix = "ADAPTIVE_AI_SNAPSHOT:"
-        async for line in process.stdout:
+        while line := await asyncio.to_thread(process.stdout.readline):
             decoded = line.decode(errors="replace").strip()
             if decoded.startswith(prefix):
                 try:
@@ -199,11 +204,18 @@ class SimulationManager:
                     logger.exception("Ignoring invalid live training snapshot")
             elif decoded:
                 logger.info("Live training %s: %s", run_name, decoded)
-        return_code = await process.wait()
+        process.stdout.close()
+        return_code = await asyncio.to_thread(process.wait)
         if return_code:
             logger.error("Live training process exited with status %d", return_code)
         if self._training_snapshot is not None:
-            self._training_snapshot = self._training_snapshot.model_copy(update={"status": "paused"})
+            self._training_snapshot = self._training_snapshot.model_copy(update={
+                "status": "paused",
+                "training_error": (
+                    f"Training worker exited with code {return_code}. Check the backend terminal."
+                    if return_code else None
+                ),
+            })
         self._training_process = None
 
     def _ensure_training_stopped(self) -> None:

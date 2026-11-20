@@ -44,6 +44,7 @@ export type SimulationSnapshot = {
   policy_name: string | null;
   training_run: string | null;
   training_timesteps: number | null;
+  training_error: string | null;
 };
 
 export type SimulationConfig = {

@@ -165,7 +165,7 @@ async def start_live_training(body: TrainingRequest, request: Request) -> Simula
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OSError as error:
-        raise HTTPException(status_code=500, detail="Unable to create the training output directory") from error
+        raise HTTPException(status_code=500, detail=f"Could not start training: {error}") from error
 
 
 @app.post("/training/stop", response_model=SimulationSnapshot)
