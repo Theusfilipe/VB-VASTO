@@ -165,3 +165,88 @@ New environments can provide their own sensors, actions, and rewards without
 changing PPO. External game adapters should implement the same environment
 interface. Multiple agents, external transports, and other learning algorithms
 are outside this milestone.
+
+## Web simulation dashboard
+
+The optional dashboard is split into `/backend` and `/frontend`. It observes the
+same headless Gymnasium environment used by the Python tools; the API does not
+reimplement simulation mechanics, and the Python package remains usable without
+FastAPI or Node.js.
+
+### Install and run locally
+
+Use the Python 3.12 environment from the setup above, then install the web extra:
+
+```sh
+python -m pip install -e '.[web]'
+uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+In another terminal:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The API allows requests
+from `http://localhost:3000` and `http://127.0.0.1:3000`; set
+`DASHBOARD_ORIGINS` to a comma-separated list to change those origins. Set
+`NEXT_PUBLIC_API_URL` before starting Next.js to change the backend HTTP URL
+(the WebSocket URL is derived from it).
+
+Install `.[learning,web]` instead of `.[web]` to enable PPO policy evaluation
+and live training. Set `ADAPTIVE_AI_MODELS_DIR` to a directory for trusted
+checkpoints and training runs before starting the backend. To evaluate an
+existing policy, enter a checkpoint filename such as `ppo_final.zip` and select
+**Load policy**. Checkpoints in a live training subdirectory can be loaded by
+their relative path, such as `live-a1b2c3d4e5f6/ppo_final.zip`. PPO checkpoints
+use Python serialization; load only files you trust. Without a loaded policy,
+**Start** advances the environment with `IDLE`; manual stepping allows
+selecting an action.
+
+Select **Train live** while the simulation is paused to start a separate PPO
+training environment and stream its snapshots to the dashboard. The dashboard
+shows the active training environment and completed-episode metrics; snapshots
+are emitted at most every 100 ms rather than on every training transition.
+Training runs and checkpoints are saved under `ADAPTIVE_AI_MODELS_DIR`; select
+**Stop training** to request a graceful stop and save the final checkpoint.
+Ordinary `train.py` remains headless and independent of the web service.
+
+### API and execution model
+
+- `GET /simulation/state` returns the latest immutable snapshot;
+  `GET /simulation/config` returns the current environment configuration.
+- `POST /simulation/start`, `/simulation/pause`, `/simulation/reset`,
+  `/simulation/step`, and `/simulation/speed` control the shared simulation.
+  Reset accepts an optional JSON `seed`; step takes an action integer from 0 to
+  7 and is rejected with HTTP 409 while running; speed accepts `1`, `2`, `5`,
+  or `10`.
+- `POST /simulation/policy` loads a checkpoint by filename from the configured
+  local models directory and adopts its saved adjacent `config.json`. Candidate
+  policies load off the event loop, and are installed only after their Gym
+  observation and action spaces match the simulation.
+- `POST /training/start` accepts `total_steps` and `seed` and starts an isolated
+  live PPO run; `POST /training/stop` requests a cooperative stop. Live training
+  requires both the `learning` extra and `ADAPTIVE_AI_MODELS_DIR`.
+- `/ws/simulation` sends current snapshots at 10 Hz. It does not own or advance
+  the environment; every connected browser observes the same manager. The
+  manager runs independently of connected clients, advances at
+  `10 × selected speed` steps per second, and only retains the latest 100
+  episode
+  metrics. There is no queue of stale frames for slow clients.
+
+Snapshots have dimensions, episode and step numbers, run status, resources,
+agent state, cumulative reward, and completed episode metrics. The schema
+represents agent and resource collections, although this simulation currently
+creates one rabbit and Plant Fiber. Episode charts show only completed episode
+results emitted by the simulation: reward, survival duration, rolling mean of
+up to ten episode durations, food consumed, and the fraction of steps spent
+sleeping. No synthetic training history is generated. The Canvas draws the
+world and agent selection; the browser does not choose policy actions or set
+simulation timing.
+
+The dashboard frontend has its own `npm run lint`, `npx tsc --noEmit`, and
+`npm run build` checks. Backend API, controls, snapshots, and WebSocket behavior
+are exercised by `python -m pytest`.
