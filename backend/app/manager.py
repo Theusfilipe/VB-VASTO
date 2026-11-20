@@ -71,6 +71,7 @@ class SimulationManager:
     async def pause(self) -> SimulationSnapshot:
         async with self._lock:
             self._ensure_training_stopped()
+            self._training_snapshot = None
             self.running = False
             return await asyncio.to_thread(self._snapshot)
 
@@ -108,11 +109,11 @@ class SimulationManager:
         async with self._lock:
             return asdict(self.config)
 
-    async def load_policy(self, model_path: Path) -> SimulationSnapshot:
+    async def load_policy(self, model_path: Path, model_name: str) -> SimulationSnapshot:
         candidate = await asyncio.to_thread(self._prepare_policy, model_path)
         async with self._lock:
             self._ensure_training_stopped()
-            return await asyncio.to_thread(self._install_policy, *candidate)
+            return await asyncio.to_thread(self._install_policy, *candidate, model_name)
 
     async def start_live_training(
         self, total_steps: int, seed: int, models_directory: Path,
@@ -191,7 +192,9 @@ class SimulationManager:
             decoded = line.decode(errors="replace").strip()
             if decoded.startswith(prefix):
                 try:
-                    self._training_snapshot = SimulationSnapshot.model_validate_json(decoded[len(prefix):])
+                    snapshot = SimulationSnapshot.model_validate_json(decoded[len(prefix):])
+                    # Keep controls locked until the worker has exited.
+                    self._training_snapshot = snapshot.model_copy(update={"status": "running"})
                 except ValueError:
                     logger.exception("Ignoring invalid live training snapshot")
             elif decoded:
@@ -260,7 +263,7 @@ class SimulationManager:
 
     def _prepare_policy(
         self, model_path: Path,
-    ) -> tuple[RabbitSurvivalEnv, Any, Any, RabbitSurvivalConfig, str]:
+    ) -> tuple[RabbitSurvivalEnv, Any, Any, RabbitSurvivalConfig]:
         from stable_baselines3 import PPO
 
         with model_path.with_name("config.json").open(encoding="utf-8") as stream:
@@ -281,7 +284,7 @@ class SimulationManager:
         except Exception:
             candidate_env.close()
             raise
-        return candidate_env, observation, model, config, model_path.name
+        return candidate_env, observation, model, config
 
     def _install_policy(
         self, candidate_env: RabbitSurvivalEnv, observation: Any, model: Any,

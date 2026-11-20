@@ -63,7 +63,13 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
 .world-legend .world-step { margin-left: auto; color: #98a19b; font-size: 9px; letter-spacing: .7px; }
 .world-step b { color: #3c5042; font-size: 11px; }
 
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 12px; border-top: 1px solid #f0f2ef; }
+.controls { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid #f0f2ef; }
+.control-section { min-width: 0; display: grid; gap: 7px; padding: 10px 12px; border: 1px solid #e6ebe5; border-radius: 6px; }
+.control-section h3 { margin: 0; color: #4a574d; font-size: 13px; }
+.control-section p { margin: 0; color: #59665c; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.control-row label { display: inline-flex; align-items: center; gap: 5px; color: #59665c; font-size: 11px; }
+.control-row input { width: 7rem; height: 32px; padding: 0 7px; border: 1px solid #e6ebe5; border-radius: 5px; color: #59665c; font: inherit; }
 .button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; justify-content: center; padding: 0 11px; border: 1px solid transparent; border-radius: 5px; font-size: 10px; font-weight: 600; transition: background .15s, border-color .15s; }
 .button span { font-size: 9px; }
 .button-primary { background: #53745a; color: #fff; }
@@ -71,19 +77,13 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
 .button-muted { background: #f5f7f4; color: #8a958c; border-color: #edf0ec; }
 .button-outline { border-color: #e2e8e2; background: #fff; color: #5a685e; }
 .button-outline:hover:not(:disabled) { background: #f7f9f6; }
-.action-select { min-width: 100px; height: 32px; padding: 0 7px; border: 1px solid #e6ebe5; border-radius: 5px; outline: 0; color: #637067; background: white; font-size: 10px; }
-.speed-control { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.action-select { min-width: 100px; height: 32px; padding: 0 7px; border: 1px solid #e6ebe5; border-radius: 5px; color: #637067; background: white; font-size: 11px; }
+.policy-select { width: min(100%, 19rem); text-overflow: ellipsis; }
+.speed-control { display: flex; align-items: center; gap: 7px; }
 .speed-control > span { color: #9aa39c; font-size: 8px; letter-spacing: .6px; }
 .speed-control > div { display: flex; gap: 2px; padding: 2px; border: 1px solid #edf0ec; border-radius: 5px; }
 .speed-control button { height: 23px; min-width: 27px; padding: 0 5px; border: 0; border-radius: 3px; background: transparent; color: #808a82; font-size: 9px; }
 .speed-control button.speed-active { background: #eaf0e9; color: #47664d; font-weight: 700; }
-.reset-control { display: flex; align-items: center; gap: 5px; margin-left: 2px; }
-.reset-control input { width: 44px; height: 30px; padding: 0 5px; border: 1px solid #e6ebe5; border-radius: 5px; color: #657168; font-size: 10px; }
-.policy-control { display: flex; align-items: center; gap: 5px; }
-.policy-control input { width: 116px; height: 30px; padding: 0 7px; border: 1px solid #e6ebe5; border-radius: 5px; color: #657168; font-size: 10px; }
-.training-control { display: flex; align-items: center; gap: 5px; margin-left: auto; }
-.training-control > span { max-width: 180px; overflow: hidden; color: #849087; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.training-control input { width: 74px; height: 30px; padding: 0 5px; border: 1px solid #e6ebe5; border-radius: 5px; color: #657168; font-size: 10px; }
 
 .inspector-panel { display: flex; min-height: 100%; flex-direction: column; padding: 20px 19px 0; }
 .count-badge { padding: 5px 7px; border-radius: 4px; background: #f4f6f3; color: #819087; font-size: 8px; letter-spacing: .6px; }
@@ -133,10 +133,6 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
 @media (max-width: 960px) {
   .dashboard-shell { padding-right: 22px; padding-left: 22px; }
   .workspace { grid-template-columns: minmax(0, 1fr) 290px; }
-  .controls { gap: 5px; }
-  .speed-control { margin-left: 0; }
-  .policy-control { order: 2; }
-  .training-control { margin-left: 0; }
   .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -150,8 +146,6 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
   .workspace { grid-template-columns: 1fr; }
   .world-panel, .metrics-panel { padding-right: 13px; padding-left: 13px; }
   .inspector-panel { min-height: 280px; }
-  .controls { gap: 6px; }
-  .speed-control { margin-left: auto; }
   .world-legend { flex-wrap: wrap; gap: 11px 15px; padding: 7px 0; }
   .metrics-grid { grid-template-columns: 1fr; }
   .footer { gap: 12px; font-size: 8px; }

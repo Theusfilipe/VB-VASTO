@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.manager import SNAPSHOT_RATE, SimulationManager
 from backend.app.schemas import (
     OperationResult,
+    PolicyCatalog,
     PolicyRequest,
     ResetRequest,
     SimulationConfig,
@@ -97,17 +98,51 @@ async def set_speed(body: SpeedRequest, request: Request) -> SimulationSnapshot:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+def local_policy_path(root: Path, model_name: str) -> Path | None:
+    model_path = (root / model_name).resolve()
+    if not model_path.is_relative_to(root) or not model_path.is_file():
+        return None
+    config = model_path.with_name("config.json").resolve()
+    if not config.is_relative_to(root) or not config.is_file():
+        return None
+    return model_path
+
+
+def discover_policies(root: Path) -> tuple[str, ...]:
+    names = []
+    for path in root.rglob("*.zip"):
+        name = path.relative_to(root).as_posix()
+        try:
+            PolicyRequest(model_name=name)
+        except ValueError:
+            continue
+        if local_policy_path(root, name) is not None:
+            names.append(name)
+    return tuple(sorted(names))
+
+
+@app.get("/simulation/policies", response_model=PolicyCatalog)
+async def list_policies() -> PolicyCatalog:
+    models_directory = os.getenv("ADAPTIVE_AI_MODELS_DIR")
+    if not models_directory:
+        return PolicyCatalog(configured=False)
+    root = Path(models_directory).expanduser().resolve()
+    if root.exists() and not root.is_dir():
+        raise HTTPException(status_code=503, detail="ADAPTIVE_AI_MODELS_DIR must be a directory")
+    return PolicyCatalog(configured=True, policies=await asyncio.to_thread(discover_policies, root))
+
+
 @app.post("/simulation/policy", response_model=SimulationSnapshot)
 async def load_policy(body: PolicyRequest, request: Request) -> SimulationSnapshot:
     models_directory = os.getenv("ADAPTIVE_AI_MODELS_DIR")
     if not models_directory:
         raise HTTPException(status_code=503, detail="Set ADAPTIVE_AI_MODELS_DIR to enable trusted local policies")
     root = Path(models_directory).expanduser().resolve()
-    model_path = (root / body.model_name).resolve()
-    if not model_path.is_relative_to(root) or not model_path.is_file():
-        raise HTTPException(status_code=404, detail="Policy not found in ADAPTIVE_AI_MODELS_DIR")
+    model_path = local_policy_path(root, body.model_name)
+    if model_path is None:
+        raise HTTPException(status_code=404, detail="Policy and its config.json must be in ADAPTIVE_AI_MODELS_DIR")
     try:
-        return await manager_from(request).load_policy(model_path)
+        return await manager_from(request).load_policy(model_path, body.model_name)
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ImportError as error:

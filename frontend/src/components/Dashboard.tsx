@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { WorldCanvas } from "@/components/WorldCanvas";
 import { TrainingMetrics } from "@/components/TrainingMetrics";
 import { API_URL, WS_URL } from "@/lib/types";
-import type { AgentSnapshot, SimulationConfig, SimulationSnapshot } from "@/lib/types";
+import type { AgentSnapshot, PolicyCatalog, SimulationConfig, SimulationSnapshot } from "@/lib/types";
 
-const ACTIONS = ["IDLE", "MOVE_UP", "MOVE_DOWN", "MOVE_LEFT", "MOVE_RIGHT", "COLLECT", "EAT", "SLEEP"];
+const ACTIONS = ["Idle", "Move up", "Move down", "Move left", "Move right", "Collect", "Eat", "Sleep"];
 const speeds = [1, 2, 5, 10] as const;
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
@@ -62,7 +62,11 @@ export function Dashboard() {
   const [action, setAction] = useState(0);
   const [seed, setSeed] = useState("0");
   const [trainingSteps, setTrainingSteps] = useState("150000");
+  const [trainingSeed, setTrainingSeed] = useState("0");
   const [policyName, setPolicyName] = useState("");
+  const [catalog, setCatalog] = useState<PolicyCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -147,6 +151,28 @@ export function Dashboard() {
   const running = snapshot?.status === "running";
   const liveTraining = snapshot?.execution_mode === "training";
   const trainingRunning = running && liveTraining;
+  const completedRun = liveTraining && !running ? snapshot?.training_run : null;
+  const activePolicy = snapshot?.policy_name;
+  const blocked = !snapshot || busy;
+  const totalSteps = Number(trainingSteps);
+  const validTrainingSteps = Number.isInteger(totalSteps) && totalSteps >= 512 && totalSteps <= 5000000;
+
+  useEffect(() => {
+    let active = true;
+    void request<PolicyCatalog>("/simulation/policies").then((next) => {
+      if (!active) return;
+      setCatalog(next);
+      setCatalogError(null);
+      setPolicyName((current) => {
+        const latest = `${completedRun}/ppo_final.zip`;
+        if (completedRun && next.policies.includes(latest)) return latest;
+        return next.policies.includes(current) ? current : "";
+      });
+    }).catch((reason: unknown) => {
+      if (active) setCatalogError(reason instanceof Error ? reason.message : "Could not list saved policies.");
+    });
+    return () => { active = false; };
+  }, [catalogRevision, completedRun]);
 
   return (
     <main className="dashboard-shell">
@@ -157,7 +183,7 @@ export function Dashboard() {
 
       <section className="page-intro">
         <div><p className="eyebrow">OBSERVATION STUDIO <span>•</span> RABBIT SURVIVAL</p><h1>Simulation dashboard</h1><p className="intro-copy">A live view into agent behavior and environmental state.</p></div>
-        <div className="episode-badge"><span>EPISODE</span><b>{snapshot?.episode ?? "—"}</b><i />{trainingRunning ? "LIVE TRAINING" : running ? "RUNNING" : "PAUSED"}</div>
+        <div className="episode-badge"><span>EPISODE</span><b>{snapshot?.episode ?? "—"}</b><i />{trainingRunning ? "LIVE TRAINING" : completedRun ? "TRAINING ENDED" : running ? activePolicy ? "POLICY PLAYBACK" : "IDLE PLAYBACK" : "PAUSED"}</div>
       </section>
 
       {error && <div className="error-banner" role="status"><span>Connection notice</span>{error}<button onClick={() => window.location.reload()}>Retry</button></div>}
@@ -177,20 +203,48 @@ export function Dashboard() {
           ) : <div className="world-loading">Waiting for simulation snapshot…</div>}
           <div className="world-legend"><span><i className="legend-rabbit" />Rabbit</span><span><i className="legend-resource" />Plant fiber</span><span><i className="legend-radius" />Perception radius</span><span className="world-step">STEP <b>{snapshot?.simulation_step ?? "—"}</b></span></div>
           <div className="controls">
-            <button className={`button ${running ? "button-muted" : "button-primary"}`} disabled={busy || running} onClick={() => void control("/simulation/start")}><span>▶</span> Start</button>
-            <button className={`button ${running ? "button-primary" : "button-muted"}`} disabled={busy || !running || trainingRunning} onClick={() => void control("/simulation/pause")}><span>Ⅱ</span> Pause</button>
-            <button className="button button-outline" disabled={busy || running} onClick={() => void control("/simulation/step", { action })}><span>→</span> Step</button>
-            <select className="action-select" aria-label="Action for manual step" value={action} onChange={(event) => setAction(Number(event.target.value))} disabled={busy || running}>{ACTIONS.map((name, index) => <option value={index} key={name}>{name.replaceAll("_", " ")}</option>)}</select>
-            <div className="speed-control"><span>SPEED</span><div>{speeds.map((speed) => <button key={speed} disabled={liveTraining} onClick={() => void control("/simulation/speed", { speed })} className={snapshot?.speed === speed ? "speed-active" : ""} aria-pressed={snapshot?.speed === speed}>{speed}×</button>)}</div></div>
-            <div className="policy-control"><input aria-label="PPO checkpoint filename" placeholder="policy.zip or live-run/ppo_final.zip" value={policyName} onChange={(event) => setPolicyName(event.target.value)} /><button className="button button-outline" disabled={busy || liveTraining || !policyName.trim()} onClick={() => void control("/simulation/policy", { model_name: policyName.trim() })}>Load policy</button></div>
-            <div className="reset-control"><input aria-label="Reset seed" value={seed} inputMode="numeric" onChange={(event) => setSeed(event.target.value)} /><button className="button button-outline" disabled={busy || trainingRunning} onClick={() => void control("/simulation/reset", { seed: seed === "" ? null : Number(seed) })}>Reset</button></div>
-            <div className="training-control">
-              <span>{liveTraining && snapshot?.training_timesteps !== null && snapshot?.training_timesteps !== undefined ? `${snapshot.training_timesteps.toLocaleString()} steps · ${snapshot.training_run}` : "LIVE PPO"}</span>
-              <input aria-label="Live training timesteps" type="number" min={512} max={5000000} step={512} value={trainingSteps} onChange={(event) => setTrainingSteps(event.target.value)} disabled={trainingRunning} />
-              {trainingRunning
-                ? <button className="button button-outline" disabled={busy} onClick={() => void control("/training/stop")}>Stop training</button>
-                : <button className="button button-outline" disabled={busy || running || Number(trainingSteps) < 512} onClick={() => void control("/training/start", { total_steps: Number(trainingSteps), seed: Number(seed || 0) })}>Train live</button>}
-            </div>
+            <section className="control-section" aria-labelledby="manual-heading">
+              <h3 id="manual-heading">Manual control</h3>
+              <p>While paused, choose an action and apply it once. The loaded policy is not used for manual steps.</p>
+              <div className="control-row">
+                <select className="action-select" aria-label="Action for manual step" value={action} onChange={(event) => setAction(Number(event.target.value))} disabled={blocked || running || liveTraining}>{ACTIONS.map((name, index) => <option value={index} key={name}>{name}</option>)}</select>
+                <button className="button button-outline" disabled={blocked || running || liveTraining || snapshot?.agents[0]?.alive === false} onClick={() => void control("/simulation/step", { action })}>Step once</button>
+                <label>World seed <input value={seed} inputMode="numeric" onChange={(event) => setSeed(event.target.value)} disabled={blocked || running || liveTraining} /></label>
+                <button className="button button-outline" disabled={blocked || running || liveTraining} onClick={() => void control("/simulation/reset", { seed: seed === "" ? null : Number(seed) })}>Reset world</button>
+              </div>
+              {!liveTraining && !running && snapshot?.agents[0]?.alive === false && <p>Reset the world to start a new episode.</p>}
+            </section>
+            <section className="control-section" aria-labelledby="playback-heading">
+              <h3 id="playback-heading">Playback</h3>
+              <p>{liveTraining ? "Load a saved policy or return to the simulation before playing." : activePolicy ? <>Active policy: <strong>{activePolicy}</strong>. Playback uses it without training.</> : "No policy loaded. Idle playback advances time without moving the rabbit or training it."}</p>
+              <div className="control-row">
+                <button className="button button-primary" disabled={blocked || running || liveTraining} onClick={() => void control("/simulation/start")}>{activePolicy ? "Run policy" : "Run idle simulation"}</button>
+                <button className="button button-outline" disabled={blocked || !running || liveTraining} onClick={() => void control("/simulation/pause")}>Pause playback</button>
+                <div className="speed-control"><span>SPEED</span><div>{speeds.map((speed) => <button key={speed} disabled={blocked || liveTraining} onClick={() => void control("/simulation/speed", { speed })} className={snapshot?.speed === speed ? "speed-active" : ""} aria-pressed={snapshot?.speed === speed}>{speed}×</button>)}</div></div>
+              </div>
+              <div className="control-row">
+                <select className="action-select policy-select" aria-label="Saved policy" value={policyName} onChange={(event) => setPolicyName(event.target.value)} disabled={blocked || running || !catalog?.policies.length}>
+                  <option value="">Select a saved policy</option>
+                  {catalog?.policies.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <button className="button button-outline" disabled={blocked || running || !policyName} onClick={() => void control("/simulation/policy", { model_name: policyName })}>Load policy</button>
+                <button className="button button-outline" onClick={() => setCatalogRevision((current) => current + 1)}>Refresh policies</button>
+              </div>
+              {catalogError ? <p role="status">{catalogError}</p> : catalog?.configured === false ? <p>Set <code>ADAPTIVE_AI_MODELS_DIR</code> on the backend to list saved policies and enable training.</p> : catalog?.policies.length === 0 ? <p>No saved policies found. Train a new policy, or put a trusted checkpoint and its <code>config.json</code> in the configured models directory and refresh.</p> : null}
+            </section>
+            <section className="control-section" aria-labelledby="training-heading">
+              <h3 id="training-heading">Training</h3>
+              <p>Train a new PPO policy in a separate simulation. Load its saved checkpoint under Playback to use it.</p>
+              <div className="control-row">
+                <label>Training steps <input type="number" min={512} max={5000000} value={trainingSteps} onChange={(event) => setTrainingSteps(event.target.value)} disabled={trainingRunning} /></label>
+                <label>Training seed <input type="number" min={0} max={4294967295} value={trainingSeed} onChange={(event) => setTrainingSeed(event.target.value)} disabled={trainingRunning} /></label>
+                {trainingRunning
+                  ? <button className="button button-outline" disabled={blocked} onClick={() => void control("/training/stop")}>Stop training</button>
+                  : <button className="button button-primary" disabled={blocked || running || !validTrainingSteps || catalog?.configured === false} onClick={() => void control("/training/start", { total_steps: totalSteps, seed: Number(trainingSeed || 0) })}>Start live training</button>}
+                {completedRun && <button className="button button-outline" disabled={blocked} onClick={() => void control("/simulation/pause")}>Return to simulation</button>}
+              </div>
+              {liveTraining && snapshot?.training_timesteps != null && <p>{snapshot.training_timesteps.toLocaleString()} training steps · {snapshot.training_run}</p>}
+            </section>
           </div>
         </div>
 

@@ -119,6 +119,11 @@ class PolicyRequest(Schema):
     )
 
 
+class PolicyCatalog(Schema):
+    configured: bool
+    policies: tuple[str, ...] = ()
+
+
 class TrainingRequest(Schema):
     total_steps: int = Field(default=150_000, ge=512, le=5_000_000)
     seed: int = Field(default=0, ge=0, le=2**32 - 1)

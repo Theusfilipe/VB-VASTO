@@ -175,12 +175,41 @@ FastAPI or Node.js.
 
 ### Install and run locally
 
-Use the Python 3.12 environment from the setup above, then install the web extra:
+On Windows, after installing the Python `web` extra and running `npm ci` in
+`frontend` once, start both dev servers from the repository root:
+
+```powershell
+.\start-dashboard.ps1
+```
+
+The script opens a separate window for each server. Open
+[http://127.0.0.1:3000](http://127.0.0.1:3000) once both servers are ready.
+Press Ctrl+C in each server window to stop it. The launcher does not install
+anything and defaults `ADAPTIVE_AI_MODELS_DIR` to the repository's `runs`
+directory unless you set it yourself.
+
+#### Manual startup
+
+From the repository root, use the Python environment from the setup above.
+If the web dependencies are not already installed in that environment, install
+the `web` extra before starting the backend. Pick one of these blocks:
+
+**Using `py` (Windows PowerShell):**
+
+```powershell
+py -m pip install -e '.[web]'
+py -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+**Using `python`:**
 
 ```sh
 python -m pip install -e '.[web]'
-uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+Running Uvicorn as a Python module works even if the `uvicorn` command is not on
+your `PATH`.
 
 In another terminal:
 
@@ -196,22 +225,27 @@ from `http://localhost:3000` and `http://127.0.0.1:3000`; set
 `NEXT_PUBLIC_API_URL` before starting Next.js to change the backend HTTP URL
 (the WebSocket URL is derived from it).
 
-Install `.[learning,web]` instead of `.[web]` to enable PPO policy evaluation
-and live training. Set `ADAPTIVE_AI_MODELS_DIR` to a directory for trusted
-checkpoints and training runs before starting the backend. To evaluate an
-existing policy, enter a checkpoint filename such as `ppo_final.zip` and select
-**Load policy**. Checkpoints in a live training subdirectory can be loaded by
-their relative path, such as `live-a1b2c3d4e5f6/ppo_final.zip`. PPO checkpoints
-use Python serialization; load only files you trust. Without a loaded policy,
-**Start** advances the environment with `IDLE`; manual stepping allows
-selecting an action.
+Install `.[learning,web]` instead of `.[web]` to enable PPO policy playback
+and live training. Before starting the backend, set `ADAPTIVE_AI_MODELS_DIR`
+to a trusted directory for checkpoints and training runs. For example, in
+PowerShell from the repository root: `$env:ADAPTIVE_AI_MODELS_DIR = ".\runs"`.
 
-Select **Train live** while the simulation is paused to start a separate PPO
-training environment and stream its snapshots to the dashboard. The dashboard
-shows the active training environment and completed-episode metrics; snapshots
-are emitted at most every 100 ms rather than on every training transition.
-Training runs and checkpoints are saved under `ADAPTIVE_AI_MODELS_DIR`; select
-**Stop training** to request a graceful stop and save the final checkpoint.
+- **Manual control:** Pause playback, choose an action, and click **Step once**.
+  The selected action is used instead of the policy. **Reset world** starts a
+  new episode.
+- **Playback:** Choose a checkpoint from **Saved policy**, click **Load policy**,
+  then **Run policy**. This does not train the policy. If no policy is loaded,
+  **Run idle simulation** advances the world using `IDLE` on every step.
+  To add an existing checkpoint, place the `.zip` and its `config.json` together
+  in the models directory or a subdirectory, then click **Refresh policies**.
+  PPO checkpoints use Python serialization; only add files you trust.
+- **Training:** While playback is paused, set a **Training steps** budget (not
+  an episode count) and click **Start live training**. This trains a new PPO
+  policy in a separate environment and streams snapshots at most every 100 ms.
+  **Stop training** requests a graceful stop. When the run saves its final
+  checkpoint, the policy list refreshes and selects it for loading. You can
+  also choose **Return to simulation** to go back without loading it.
+
 Ordinary `train.py` remains headless and independent of the web service.
 
 ### API and execution model
@@ -223,7 +257,9 @@ Ordinary `train.py` remains headless and independent of the web service.
   Reset accepts an optional JSON `seed`; step takes an action integer from 0 to
   7 and is rejected with HTTP 409 while running; speed accepts `1`, `2`, `5`,
   or `10`.
-- `POST /simulation/policy` loads a checkpoint by filename from the configured
+- `GET /simulation/policies` lists checkpoint names relative to the configured
+  models directory without loading them.
+- `POST /simulation/policy` loads a checkpoint by relative filename from the configured
   local models directory and adopts its saved adjacent `config.json`. Candidate
   policies load off the event loop, and are installed only after their Gym
   observation and action spaces match the simulation.

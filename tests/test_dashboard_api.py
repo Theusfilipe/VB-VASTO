@@ -129,6 +129,27 @@ def test_policy_paths_allow_training_runs_but_reject_traversal() -> None:
         raise AssertionError(f"unsafe policy path was accepted: {model_name}")
 
 
+def test_policy_catalog_lists_only_local_checkpoints_with_config(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("ADAPTIVE_AI_MODELS_DIR", raising=False)
+    with TestClient(app) as client:
+        assert client.get("/simulation/policies").json() == {"configured": False, "policies": []}
+        root = tmp_path / "models"
+        monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(root))
+        assert client.get("/simulation/policies").json() == {"configured": True, "policies": []}
+
+        run = root / "live-example"
+        run.mkdir(parents=True)
+        (root / "unpaired.zip").touch()
+        (run / "config.json").write_text("{}", encoding="utf-8")
+        for name in ("ppo_final.zip", "ppo_512_steps.zip", "bad name.zip"):
+            (run / name).touch()
+        assert client.get("/simulation/policies").json() == {
+            "configured": True,
+            "policies": ["live-example/ppo_512_steps.zip", "live-example/ppo_final.zip"],
+        }
+        assert client.post("/simulation/policy", json={"model_name": "unpaired.zip"}).status_code == 404
+
+
 def test_live_training_streams_snapshots_and_loads_saved_policy(tmp_path, monkeypatch) -> None:
     pytest.importorskip("stable_baselines3")
     monkeypatch.setenv("ADAPTIVE_AI_MODELS_DIR", str(tmp_path))
@@ -154,13 +175,15 @@ def test_live_training_streams_snapshots_and_loads_saved_policy(tmp_path, monkey
         assert (tmp_path / run_name / "ppo_final.zip").is_file()
         assert (tmp_path / run_name / "config.json").is_file()
 
+        checkpoint = f"{run_name}/ppo_final.zip"
+        assert checkpoint in client.get("/simulation/policies").json()["policies"]
         loaded = client.post(
             "/simulation/policy",
-            json={"model_name": f"{run_name}/ppo_final.zip"},
+            json={"model_name": checkpoint},
         )
         assert loaded.status_code == 200, loaded.text
         assert loaded.json()["execution_mode"] == "evaluation"
-        assert loaded.json()["policy_name"] == "ppo_final.zip"
+        assert loaded.json()["policy_name"] == checkpoint
 
         restarted = client.post("/training/start", json={"total_steps": 5_000_000, "seed": 19})
         assert restarted.status_code == 200, restarted.text
@@ -176,3 +199,5 @@ def test_live_training_streams_snapshots_and_loads_saved_policy(tmp_path, monkey
         assert stopped.json()["execution_mode"] == "training"
         assert stopped.json()["status"] == "paused"
         assert (tmp_path / stopped.json()["training_run"] / "ppo_final.zip").is_file()
+        assert client.post("/simulation/pause").json()["policy_name"] == checkpoint
+        assert client.get("/simulation/state").json()["execution_mode"] == "evaluation"
