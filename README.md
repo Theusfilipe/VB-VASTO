@@ -264,6 +264,16 @@ Ordinary `train.py` remains headless and independent of the web service.
 
 - `GET /simulation/state` returns the latest immutable snapshot;
   `GET /simulation/config` returns the current environment configuration.
+- `PATCH /simulation/config/metabolism` changes just the supplied metabolic
+  parameters between simulation steps; for example, `{"basal_energy_cost": 2}`
+  consumes two energy units per awake step before action costs. Omitted values
+  keep their current settings. `POST /simulation/config/metabolism/reset` restores
+  the metabolic defaults without resetting the episode. Lowering a maximum
+  clamps the current value; raising it does not refill energy or induce fatigue.
+  Initial fractions apply at the next world reset. Both operations preserve the
+  loaded policy and history. They are unavailable in the training view: stop
+  training and return to the simulation first. Settings persist across episode
+  resets and are saved with subsequent training runs, not to existing checkpoints.
 - `POST /simulation/start`, `/simulation/pause`, `/simulation/reset`,
   `/simulation/step`, and `/simulation/speed` control the shared simulation.
   Reset accepts an optional JSON `seed`; step takes an action integer from 0 to

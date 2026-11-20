@@ -11,6 +11,7 @@ from uuid import uuid4
 from adaptive_ai.environments.rabbit_survival import RabbitSurvivalConfig, RabbitSurvivalEnv
 from adaptive_ai.environments.rabbit_survival.actions import Action
 from adaptive_ai.environments.rabbit_survival.run_config import read_config, write_config
+from adaptive_ai.mechanics.metabolism import MetabolismConfig
 from gymnasium.spaces.utils import flatdim
 
 from backend.app.schemas import EpisodeMetric, OperationResult, SimulationSnapshot
@@ -106,6 +107,19 @@ class SimulationManager:
     async def configuration(self) -> dict[str, Any]:
         async with self._lock:
             return asdict(self.config)
+
+    async def update_metabolism(self, changes: dict[str, float] | None) -> MetabolismConfig:
+        async with self._lock:
+            self._ensure_training_stopped()
+            if self._training_snapshot is not None:
+                raise RuntimeError("Return to the simulation before editing the active rabbit")
+            return await asyncio.to_thread(self._update_metabolism, changes)
+
+    def _update_metabolism(self, changes: dict[str, float] | None) -> MetabolismConfig:
+        metabolism = MetabolismConfig() if changes is None else replace(self.config.metabolism, **changes)
+        self.observation = self.env.update_metabolism(metabolism)
+        self.config = self.env.config
+        return metabolism
 
     async def load_policy(self, model_path: Path, model_name: str) -> SimulationSnapshot:
         candidate = await asyncio.to_thread(self._prepare_policy, model_path)
